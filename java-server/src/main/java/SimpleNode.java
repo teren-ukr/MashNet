@@ -8,11 +8,13 @@ import io.rsocket.util.DefaultPayload;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Scanner;
+import java.util.concurrent.ConcurrentHashMap;
 
 class SimpleNode {
 
-    private RSocket neighborSession; // Збережена сесія для відправки команд у будь-який момент
+    private static final Map<Integer, RSocket> connections = new ConcurrentHashMap<>();// масив підключень
     public static int port;
     public static boolean isServerStart;
 
@@ -54,7 +56,7 @@ class SimpleNode {
                     // КРИТИЧНО: зчитуємо залишок рядка (\n), щоб він не потрапив у наступний цикл
                     if (scanner.hasNextLine()) scanner.nextLine();
 
-                    node.run(myPort, p);
+                    node.runNode(myPort, p);
                 }
 
                 case "3", "SEND" -> node.triggerLoadSchema();
@@ -77,19 +79,22 @@ class SimpleNode {
     /**
      * Запуск ноди: активує сервер та намагається підключитися до сусіда
      */
-    void run(int myPort, int targetPort) {
-        // 1. перевірка сервера
+    void runNode(int myPort, int targetPort) {
         if (!isServerStart) {
             System.err.println("!!! Помилка: Сервер не запущено");
             return;
         }
 
-        // 2. Встановлюємо з'єднання та зберігаємо його
         connectToNeighbor(targetPort)
                 .subscribe(
                         rsocket -> {
-                            this.neighborSession = rsocket;
-                            System.out.println("\n[OK] З'єднання з сусідом встановлено і збережено!");
+                            // Зберігаємо в мапу
+                            connections.put(targetPort, rsocket);
+                            System.out.println("\n[OK] Підключено до ноди: " + targetPort);
+
+                            // ВІДРАЗУ реєструємо себе у сусіда (Metadata = наш порт, Data = "GREETING")
+                            rsocket.fireAndForget(DefaultPayload.create("GREETING", String.valueOf(myPort)))
+                                    .subscribe();
                         },
                         err -> System.err.println("\n[ERROR] Не вдалося з'єднатися: " + err.getMessage())
                 );
@@ -97,7 +102,7 @@ class SimpleNode {
 
     //------------------------------------------------------------------------------------------------------------------
     private static void startServer(int port) {
-        RSocketServer.create((_, _) -> Mono.just(new NodeRequestHandler()))
+        RSocketServer.create((_, _) -> Mono.just(new NodeRequestHandler(connections)))
                 // ДОДАЄМО ЦЕЙ БЛОК:
                 .resume(new io.rsocket.core.Resume()
                         .sessionDuration(Duration.ofMinutes(5)))
@@ -130,19 +135,22 @@ class SimpleNode {
      * Публічний метод для виклику відправки з меню
      */
     public void triggerLoadSchema() {
-        if (neighborSession == null) {
-            System.err.println("!!! Помилка: Немає з'єднання.");
+        if (connections.isEmpty()) {
+            System.err.println("!!! Помилка: Немає активних підключень.");
             return;
         }
 
-        // Створюємо Payload: (Data, Metadata)
-        // Data = "LOAD_SCHEMA", Metadata = "7006" (твій порт)
-        Payload payload = DefaultPayload.create("LOAD_SCHEMA", String.valueOf(port));
+        //TODO зробити розсилку тіки конкректному порту
+        System.out.println("Розсилка LOAD_SCHEMA всім сусідам (" + connections.size() + ")...");
 
-        neighborSession.requestResponse(payload)
-                .subscribe(
-                        res -> System.out.println("<<< Відповідь: " + res.getDataUtf8()),
-                        err -> System.err.println("!!! Помилка: " + err.getMessage())
-                );
+        connections.forEach((targetPort, rsocket) -> {
+            Payload payload = DefaultPayload.create("LOAD_SCHEMA", String.valueOf(port));
+
+            rsocket.requestResponse(payload)
+                    .subscribe(
+                            res -> System.out.println("<<< Відповідь від " + targetPort + ": " + res.getDataUtf8()),
+                            err -> System.err.println("!!! Помилка (нода " + targetPort + "): " + err.getMessage())
+                    );
+        });
     }
 }
