@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.example.mash</groupId>
+        <artifactId>mash-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>mash-stream</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.example.mash</groupId>
+            <artifactId>mash-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.example.mash</groupId>
+            <artifactId>mash-network</artifactId> <!-- Потрібно для зв'язку з сокетами -->
+        </dependency>
+        <dependency>
+            <groupId>io.rsocket</groupId>
+            <artifactId>rsocket-core</artifactId>
+        </dependency>
+    </dependencies>
+</project>

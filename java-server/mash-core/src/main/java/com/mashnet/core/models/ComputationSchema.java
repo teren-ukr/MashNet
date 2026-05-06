@@ -1,3 +1,5 @@
+package com.mashnet.core.models;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class ComputationSchema {
@@ -6,15 +8,14 @@ public class ComputationSchema {
     public String schemaId;
 
     @JsonProperty("operation")
-    public String operation; // Наприклад: "ADD", "MULTIPLY", "PROCESS_IMAGE"
+    public String operation;
 
     @JsonProperty("input_source")
-    public String inputSource; // Звідки беремо дані (наприклад, "port:7001" або "db_url")
+    public String inputSource;
 
     @JsonProperty("output_sink")
-    public String outputSink; // Куди відправляємо результат
+    public String outputSink;
 
-    // Порожній конструктор потрібен для Jackson
     public ComputationSchema() {}
 
     public ComputationSchema(String schemaId, String operation, String inputSource, String outputSink) {

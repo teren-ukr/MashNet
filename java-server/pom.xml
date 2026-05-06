@@ -4,65 +4,75 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.example</groupId>
-    <artifactId>java-server</artifactId>
+    <groupId>org.example.mash</groupId>
+    <artifactId>mash-parent</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging> <!-- Це найважливіший рядок, означає, що це контейнер -->
 
     <properties>
         <maven.compiler.source>26</maven.compiler.source>
         <maven.compiler.target>26</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        
+        <!-- Версії бібліотек -->
+        <rsocket.version>1.1.4</rsocket.version>
+        <jackson.version>2.17.0</jackson.version>
     </properties>
 
-    <dependencies>
-        <dependency>
-            <groupId>io.rsocket</groupId>
-            <artifactId>rsocket-core</artifactId>
-            <version>1.1.4</version>
-        </dependency>
-        <dependency>
-            <groupId>io.rsocket</groupId>
-            <artifactId>rsocket-transport-netty</artifactId>
-            <version>1.1.4</version>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
-            <version>1.2.11</version>
-        </dependency>
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>RELEASE</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testng</groupId>
-            <artifactId>testng</artifactId>
-            <version>RELEASE</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>RELEASE</version>
-            <scope>test</scope>
-        </dependency>
+    <!-- Реєструємо наші модулі -->
+    <modules>
+        <module>mash-core</module>
+        <module>mash-network</module>
+        <module>mash-stream</module>
+        <module>mash-node</module>
+    </modules>
 
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcpkix-jdk18on</artifactId>
-            <version>1.78</version>
-        </dependency>
+    <!-- Керування версіями для всіх модулів -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- Наші власні модулі -->
+            <dependency>
+                <groupId>org.example.mash</groupId>
+                <artifactId>mash-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.example.mash</groupId>
+                <artifactId>mash-network</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.example.mash</groupId>
+                <artifactId>mash-stream</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.17.0</version>
-        </dependency>
-
-    </dependencies>
-
-
-
+            <!-- Зовнішні бібліотеки -->
+            <dependency>
+                <groupId>io.rsocket</groupId>
+                <artifactId>rsocket-core</artifactId>
+                <version>${rsocket.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.rsocket</groupId>
+                <artifactId>rsocket-transport-netty</artifactId>
+                <version>${rsocket.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>1.78</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>1.2.11</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 </project>
