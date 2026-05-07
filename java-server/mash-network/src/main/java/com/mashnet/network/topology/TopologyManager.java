@@ -3,10 +3,7 @@ package com.mashnet.network.topology;
 import io.rsocket.RSocket;
 import reactor.core.publisher.Sinks;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -23,6 +20,9 @@ public class TopologyManager {
 
     //глобальний список зв'язків (source -> target)
     private final List<Map<String, String>> globalEdges = new CopyOnWriteArrayList<>();
+
+    // реєстр активних потоків
+    private final Set<String> activeStreamNodes = ConcurrentHashMap.newKeySet();
 
     //шина подій
     private final Sinks.Many<String> eventSink = Sinks.many().multicast().directBestEffort();
@@ -124,6 +124,7 @@ public class TopologyManager {
             Map<String, Object> snapshot = new HashMap<>();
             snapshot.put("nodes", nodeList);
             snapshot.put("edges", allEdges);
+            snapshot.put("activeStreams",new ArrayList<>(activeStreamNodes));
             return snapshot;
         }
 
@@ -135,6 +136,20 @@ public class TopologyManager {
      */
     private  void broadcastTopologyChange(){
         eventSink.tryEmitNext("{\"event\": \"TOPOLOGY_CHANGED\"}");
+    }
+
+    /**
+     * Змінює значення чи активна нода.
+     * @param nodeId
+     * @param isActivity
+     */
+    public void setStreamStatus(String nodeId, boolean isActive){
+        if (isActive) {
+            activeStreamNodes.add(nodeId);
+        } else {
+            activeStreamNodes.remove(nodeId);
+        }
+        broadcastTopologyChange(); // Повідомляємо всіх про зміну стану
     }
 
 

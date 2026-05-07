@@ -41,12 +41,14 @@ export default function App() {
     }).subscribe({
       onComplete: (payload: any) => {
         try {
-          // Отримуємо комплексний об'єкт { nodes: [], edges: [] }
           const topologyData = JSON.parse(payload.data);
           const connectedIds: string[] = topologyData.nodes || [];
           const connectedEdges: any[] = topologyData.edges || [];
           
-          // 1. Формуємо Ноди (цей код майже не змінився)
+          // ВИПРАВЛЕННЯ 1: Отримуємо стан активних потоків з бекенду
+          const activeStreams: string[] = topologyData.activeStreams || []; 
+          
+          // 1. Формуємо Ноди
           const dynamicNodes: Node[] = connectedIds.map((id, index) => {
             let icon = '📦';
             let readableName = id;
@@ -84,21 +86,27 @@ export default function App() {
           });
 
           // 2. Формуємо Зв'язки (Edges)
-          const dynamicEdges: Edge[] = connectedEdges.map((edgeInfo, index) => {
+          const dynamicEdges: Edge[] = connectedEdges.map((edgeInfo) => {
+            // ВИПРАВЛЕННЯ 1.1: Перевіряємо, чи бере участь ця лінія в активному потоці
+            const isActive = activeStreams.includes(edgeInfo.source) || activeStreams.includes(edgeInfo.target);
+            
             return {
-              id: `edge-${index}`,
+              // ВИПРАВЛЕННЯ 2: Унікальний семантичний ID замість індексу масиву
+              id: `edge-${edgeInfo.source}-${edgeInfo.target}`,
               source: edgeInfo.source,
               target: edgeInfo.target,
-              animated: false, // ТЕПЕР СТАТИЧНІ
-              style: { stroke: '#555', strokeWidth: 1.5 }, // Сірий колір
+              animated: isActive, // Ставимо true, якщо потік вже працював до завантаження UI
+              style: { 
+                stroke: isActive ? '#00ff00' : '#555', // Зелений, якщо активно
+                strokeWidth: isActive ? 3 : 1.5 
+              }, 
             };
           });
 
-          // Оновлюємо стан React
           setNodes(dynamicNodes);
-          setEdges(dynamicEdges); // Малюємо лінії!
+          setEdges(dynamicEdges);
           
-          console.log("Топологію оновлено!");
+          console.log("Топологію оновлено! Активні потоки:", activeStreams);
 
         } catch (error) {
           console.error("Помилка парсингу JSON:", error);
@@ -115,22 +123,28 @@ export default function App() {
       data: 'SUBSCRIBE_EVENTS',
       metadata: '',
     }).subscribe({
-      onSubscribe: (sub: any) => sub.request(2147483647), // Просимо відправляти ВСІ події
+      onSubscribe: (sub: any) => sub.request(2147483647),
       onNext: (payload: any) => {
         try {
           const data = JSON.parse(payload.data);
           console.log("Отримано подію:", data);
 
-          // Оновлюємо стилі ліній динамічно
+          // Якщо змінилася топологія (хтось підключився/відключився), 
+          // краще перезапросити весь граф цілком
+          if (data.event === 'TOPOLOGY_CHANGED') {
+             fetchTopology(client);
+             return;
+          }
+
+          // Оновлюємо стилі ліній динамічно (STREAM_START / STREAM_STOP)
           setEdges((eds) => eds.map((edge) => {
-            // Якщо лінія торкається ноди, яка змінила стан
             if (edge.source === data.nodeId || edge.target === data.nodeId) {
               const isActive = data.event === 'STREAM_START';
               return {
                 ...edge,
                 animated: isActive,
                 style: {
-                  stroke: isActive ? '#00ff00' : '#555', // Зелений при роботі, інакше сірий
+                  stroke: isActive ? '#00ff00' : '#555',
                   strokeWidth: isActive ? 3 : 1.5,
                 }
               };
@@ -147,7 +161,7 @@ export default function App() {
 
   // --- Підключення з фіксом фантомних з'єднань ---
   useEffect(() => {
-    let isMounted = true; // Прапорець життєвого циклу
+    let isMounted = true; 
     let localSocket: any = null;
 
     const connectToBackend = async () => {
@@ -175,7 +189,6 @@ export default function App() {
 
         const socket = await client.connect();
 
-        // Якщо React встиг вбити компонент поки ми підключалися — закриваємо сокет
         if (!isMounted) {
           console.warn("Перехоплено фантомне з'єднання. Закриваємо...");
           socket.close();
@@ -205,7 +218,7 @@ export default function App() {
     connectToBackend();
 
     return () => {
-      isMounted = false; // Сигналізуємо, що компонент знищено
+      isMounted = false; 
       if (localSocket) {
         localSocket.close();
       } else if (rsocketRef.current) {
@@ -232,8 +245,6 @@ export default function App() {
             : '🔴 Немає з\'єднання з сервером'}
         </span>
         
-        {/* Кнопка перепідключення використовує ту саму функцію, але через реф, бо вона тепер всередині useEffect.
-            Щоб не ускладнювати код виносом функції, ми просто перезавантажуємо сторінку при ручному перепідключенні. */}
         {!isConnected && (
           <button 
             onClick={() => window.location.reload()}

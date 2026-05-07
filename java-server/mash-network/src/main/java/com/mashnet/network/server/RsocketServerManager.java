@@ -1,6 +1,8 @@
 package com.mashnet.network.server;
 
+import com.mashnet.network.client.RsocketClientManager;
 import com.mashnet.network.control.ControlCommandHandler;
+import com.mashnet.network.control.IStreamProvider;
 import com.mashnet.network.topology.TopologyManager;
 
 import io.netty.handler.ssl.SslContext;
@@ -23,9 +25,15 @@ import java.util.UUID;
 public class RsocketServerManager {
 
     private final TopologyManager topologyManager;
+    private final RsocketClientManager clientManager;
+    private final IStreamProvider streamProvider;
 
-    public RsocketServerManager(TopologyManager topologyManager) {
+    public RsocketServerManager(TopologyManager topologyManager,
+                                RsocketClientManager clientManager,
+                                IStreamProvider streamProvider) {
         this.topologyManager = topologyManager;
+        this.clientManager = clientManager;
+        this.streamProvider = streamProvider;
     }
 
     /**
@@ -60,7 +68,7 @@ public class RsocketServerManager {
                         );
 
                         // Повертаємо наш маршрутизатор як обробник усіх наступних повідомлень
-                        return Mono.just(new ControlCommandHandler(topologyManager));
+                        return Mono.just(new ControlCommandHandler(topologyManager, clientManager, streamProvider));
                     })
                     .resume(new io.rsocket.core.Resume().sessionDuration(Duration.ofMinutes(5)))
                     .bind(TcpServerTransport.create(tcpServer))
@@ -96,7 +104,7 @@ public class RsocketServerManager {
                                 () -> topologyManager.handleDisconnection(remoteNodeId)
                         );
 
-                        return Mono.just(new ControlCommandHandler(topologyManager));
+                        return Mono.just(new ControlCommandHandler(topologyManager, clientManager, streamProvider));
                     })
                     .bind(WebsocketServerTransport.create("localhost", wsPort))
                     .subscribe(v -> System.out.println(">>> [SERVER] WebSocket Сервер (UI) слухає на порту " + wsPort));
