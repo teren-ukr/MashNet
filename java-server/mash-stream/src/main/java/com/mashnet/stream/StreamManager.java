@@ -2,11 +2,13 @@ package com.mashnet.stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.mashnet.core.utils.JsonUtil;
+import com.mashnet.network.control.IStreamProvider;
 import com.mashnet.network.topology.TopologyManager;
 import com.mashnet.stream.sink.DataAggregatorSink;
 import io.rsocket.RSocket;
 import io.rsocket.util.DefaultPayload;
 import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 
@@ -16,26 +18,25 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Data Stream Layer: Керує життєвим циклом потоків даних.
  * Відкриває та закриває труби (Streams) до датчиків.
+ * Імплементує IStreamProvider для роздачі потоків іншим нодам.
  */
-public class StreamManager {
+public class StreamManager implements IStreamProvider {
 
     private final TopologyManager topologyManager;
-    private final DataAggregatorSink dataAggregator; // Наш новий математичний модуль
+    private final DataAggregatorSink dataAggregator;
 
-    // Реєстр активних "пультів керування" (Disposable) для кожного потоку
+    // Реєстр активних "пультів керування" (Disposable)
     private final Map<String, Disposable> activeStreams = new ConcurrentHashMap<>();
+
+    // Реєстр "гарячих" потоків з уже обчисленими даними для роздачі іншим
+    private final Map<String, Flux<Double>> processedOutputs = new ConcurrentHashMap<>();
 
     public StreamManager(TopologyManager topologyManager) {
         this.topologyManager = topologyManager;
         this.dataAggregator = new DataAggregatorSink();
-
-        // Підписуємося на події мережі (щоб закривати потоки "мертвих" нод)
         listenToNetworkEvents();
     }
 
-    /**
-     * Слухач системних подій (Паттерн Observer).
-     */
     private void listenToNetworkEvents() {
         topologyManager.getEventSink().asFlux().subscribe(jsonEvent -> {
             try {
@@ -50,9 +51,6 @@ public class StreamManager {
         });
     }
 
-    /**
-     * Відправляє команду START_SENSOR всім сусідам і відкриває потік даних.
-     */
     public void startAllSensorStreams() {
         Map<String, RSocket> connections = topologyManager.getActiveConnections();
 
@@ -64,26 +62,40 @@ public class StreamManager {
         System.out.println(">>> [STREAM] Запит потоку START_SENSOR від усіх підключених нод...");
 
         connections.forEach((targetNodeId, rsocket) -> {
-            // Пропускаємо Дашборди
             if (targetNodeId.contains("Dashboard") || targetNodeId.contains("UI")) return;
-
-            // Якщо потік вже відкрито — не відкриваємо двічі
             if (activeStreams.containsKey(targetNodeId) && !activeStreams.get(targetNodeId).isDisposed()) return;
 
-            // 1. Сповіщаємо UI (зелена лінія)
-            topologyManager.getEventSink().tryEmitNext("{\"event\": \"STREAM_START\", \"nodeId\": \"" + targetNodeId + "\"}");
+            //id поточної ноди
+            String myNodeId = topologyManager.getLocalNodeId();
 
-            // 2. Відкриваємо сирий потік і парсимо байти в Double
+            //позначаємо потік активним
+            topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, true);
+
             var rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
                     .map(payload -> Double.parseDouble(payload.getDataUtf8()));
 
-            // 3. Передаємо сирий потік у наш Sink (Приймач) для математики
-            Disposable streamDisposable = dataAggregator.processStream(rawStream, targetNodeId)
+            // 1. Отримуємо потік від математичного модуля і робимо його "ГАРЯЧИМ" через .share()
+            Flux<Double> sharedStream = dataAggregator.processStream(rawStream, targetNodeId).share();
+
+            // 2. Зберігаємо його в пам'ять, щоб інші ноди могли до нього підключитися
+            processedOutputs.put(targetNodeId, sharedStream);
+
+
+
+
+            // 3. Запускаємо потік
+            Disposable streamDisposable = sharedStream
                     .doOnError(e -> System.err.println(">>> [STREAM] Зв'язок з нодою " + targetNodeId + " втрачено."))
                     .onErrorResume(e -> Mono.empty())
                     .doFinally(signalType -> {
-                        // 4. Сповіщаємо UI про зупинку (сіра лінія)
-                        topologyManager.getEventSink().tryEmitNext("{\"event\": \"STREAM_STOP\", \"nodeId\": \"" + targetNodeId + "\"}");
+
+                        // ПРИ ЗУПИНЦІ робимо потік неактивним
+                        topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, false);
+                        // Очищаємо пам'ять при зупинці
+                        processedOutputs.remove(targetNodeId);
+
+
+
 
                         if (signalType == SignalType.CANCEL) {
                             System.out.println(">>> [STREAM] Потік призупинено (Нода " + targetNodeId + " залишається на зв'язку).");
@@ -91,16 +103,26 @@ public class StreamManager {
                             System.out.println(">>> [STREAM] Потік завершився для ноди " + targetNodeId);
                         }
                     })
-                    .subscribe(); // Активуємо (відкриваємо вентиль)
+                    .subscribe();
 
-            // Зберігаємо пульт керування потоком
             activeStreams.put(targetNodeId, streamDisposable);
         });
     }
 
     /**
-     * Примусово зупиняє всі активні потоки (Команда STOP).
+     * Реалізація інтерфейсу IStreamProvider.
+     * Віддає вже існуючий потік обчислень для передачі по мережі.
      */
+    @Override
+    public Flux<Double> getProcessedStream(String sourceId) {
+        // Якщо ми просто хочемо взяти перший ліпший потік (заглушка "TODO" з ControlCommandHandler)
+        if ("TODO".equals(sourceId) || sourceId.isEmpty()) {
+            return processedOutputs.values().stream().findFirst().orElse(Flux.empty());
+        }
+        // Або шукаємо по конкретному ID ноди
+        return processedOutputs.getOrDefault(sourceId, Flux.empty());
+    }
+
     public void stopAllStreams() {
         if (activeStreams.isEmpty()) {
             System.out.println(">>> [STREAM] Немає активних потоків для зупинки.");
@@ -109,19 +131,18 @@ public class StreamManager {
 
         activeStreams.forEach((targetNodeId, streamDisposable) -> {
             if (!streamDisposable.isDisposed()) {
-                streamDisposable.dispose(); // Надсилає сигнал CANCEL на датчик
+                streamDisposable.dispose();
                 System.out.println(">>> [STREAM] Потік з нодою " + targetNodeId + " зупинено.");
             }
         });
 
         activeStreams.clear();
+        processedOutputs.clear(); // Очищаємо буфер потоків
     }
 
-    /**
-     * Зупиняє потік тільки для однієї конкретної ноди (використовується при обриві зв'язку).
-     */
     private void stopStreamForNode(String nodeId) {
         Disposable stream = activeStreams.remove(nodeId);
+        processedOutputs.remove(nodeId);
         if (stream != null && !stream.isDisposed()) {
             stream.dispose();
             System.out.println(">>> [STREAM] GC: Потік для мертвої ноди " + nodeId + " очищено.");

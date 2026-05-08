@@ -1,6 +1,8 @@
 package com.mashnet.network.control;
 
+import com.mashnet.network.client.RsocketClientManager;
 import com.mashnet.network.topology.TopologyManager;
+
 import io.rsocket.Payload;
 import io.rsocket.RSocket;
 import io.rsocket.util.DefaultPayload;
@@ -21,6 +23,8 @@ import java.util.Map;
 public class ControlCommandHandler implements RSocket {
 
     private final TopologyManager topologyManager;
+    private final RsocketClientManager clientManager;
+    private final IStreamProvider streamProvider;
 
     // Реєстри команд (Словники маршрутизації)
     private final Map<String, IControlCommand> requestResponseCommands = new HashMap<>();
@@ -31,8 +35,12 @@ public class ControlCommandHandler implements RSocket {
      *
      * @param topologyManager посилання на глобальний стан мережі.
      */
-    public ControlCommandHandler(TopologyManager topologyManager) {
+    public ControlCommandHandler(TopologyManager topologyManager,
+                                 RsocketClientManager clientManager,
+                                 IStreamProvider streamProvider) {
         this.topologyManager = topologyManager;
+        this.clientManager = clientManager;
+        this.streamProvider = streamProvider;
         registerCommands();
     }
 
@@ -43,7 +51,7 @@ public class ControlCommandHandler implements RSocket {
     private void registerCommands() {
         // --- Складні команди (Request-Response) винесені в окремі класи ---
         requestResponseCommands.put("GET_TOPOLOGY", new GetTopologyCommand(topologyManager));
-        requestResponseCommands.put("LOAD_SCHEMA", new LoadSchemaCommand());
+        requestResponseCommands.put("LOAD_SCHEMA", new LoadSchemaCommand(clientManager));
 
         // --- Прості системні команди залишені як лямбда-вирази для компактності ---
         requestResponseCommands.put("WHO_ARE_YOU", (payload, nodeId) ->
@@ -66,6 +74,7 @@ public class ControlCommandHandler implements RSocket {
 
         // --- Команди без відповіді (Fire-And-Forget) ---
         fireAndForgetCommands.put("NEW_EDGE", new NewEdgeCommand(topologyManager));
+        fireAndForgetCommands.put("STREAM_EVENT", new StreamEventCommand(topologyManager));
     }
 
     /**
@@ -127,6 +136,13 @@ public class ControlCommandHandler implements RSocket {
         }
 
         // TODO: Додати обробку "START_SENSOR", коли буде створено StreamManager
+        if ("START_SENSOR".equals(command)) {
+            // У реальному коді тут треба шукати потрібний ID, поки що беремо заглушку "TODO"
+            return streamProvider.getProcessedStream("TODO")
+                    .map(value -> DefaultPayload.create(String.valueOf(value)));
+        }
+
+
         return Flux.error(new IllegalArgumentException("Невідома команда потоку: " + command));
     }
 }

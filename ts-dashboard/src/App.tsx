@@ -12,10 +12,55 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
+  Handle,
+  Position
 } from '@xyflow/react';
 import type { Connection, Edge, Node } from '@xyflow/react'; 
 import '@xyflow/react/dist/style.css';
 
+// ==========================================
+// 1. СТВОРЮЄМО КАСТОМНИЙ ВУЗОЛ (За ескізом)
+// ==========================================
+const MeshNode = ({ data }: any) => {
+  return (
+    <div style={{
+      padding: '15px 20px',
+      borderRadius: '8px',
+      background: data.customStyle?.backgroundColor || '#2b2b36',
+      border: data.customStyle?.border || '2px solid #555',
+      boxShadow: data.customStyle?.boxShadow || '0 4px 6px rgba(0,0,0,0.3)',
+      color: data.customStyle?.color || '#fff',
+      minWidth: '160px',
+      textAlign: 'center',
+      fontFamily: 'monospace',
+      position: 'relative'
+    }}>
+      {/* INPUT (Ліва сторона) */}
+      <Handle 
+        type="target" 
+        position={Position.Left} 
+        style={{ width: '10px', height: '10px', background: '#00ff00', border: '2px solid #222' }} 
+      />
+
+      <div style={{ fontSize: '24px', marginBottom: '8px' }}>{data.icon}</div>
+      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{data.label}</div>
+
+      {/* OUTPUT (Права сторона) */}
+      <Handle 
+        type="source" 
+        position={Position.Right} 
+        style={{ width: '10px', height: '10px', background: '#ff0072', border: '2px solid #222' }} 
+      />
+    </div>
+  );
+};
+
+// Реєструємо наш кастомний вузол
+const nodeTypes = { meshNode: MeshNode };
+
+// ==========================================
+// ГОЛОВНИЙ КОМПОНЕНТ APP
+// ==========================================
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
@@ -41,65 +86,88 @@ export default function App() {
     }).subscribe({
       onComplete: (payload: any) => {
         try {
-          // Отримуємо комплексний об'єкт { nodes: [], edges: [] }
           const topologyData = JSON.parse(payload.data);
           const connectedIds: string[] = topologyData.nodes || [];
           const connectedEdges: any[] = topologyData.edges || [];
+          const activeStreams: string[] = topologyData.activeStreams || []; 
           
-          // 1. Формуємо Ноди (цей код майже не змінився)
-          const dynamicNodes: Node[] = connectedIds.map((id, index) => {
-            let icon = '📦';
-            let readableName = id;
-            let customStyle = {};
+          // 1. Формуємо Ноди зі ЗБЕРЕЖЕННЯМ ПОЗИЦІЙ
+          setNodes((prevNodes) => {
+            return connectedIds.map((id, index) => {
+              // Шукаємо, чи була ця нода вже на екрані
+              const existingNode = prevNodes.find((n) => n.id === id);
 
-            if (id.startsWith('NodePy')) {
-              icon = '🐍';
-              readableName = `Python Sensor [${id.slice(-4)}]`; 
-            } else if (id.startsWith('Seed-')) {
-              icon = '👑';
-              readableName = `Java Seed`;
-              customStyle = {
-                border: '2px solid #ff0072',
-                backgroundColor: '#2b1b24', color: '#fff',
-                fontWeight: 'bold', boxShadow: '0 0 15px rgba(255, 0, 114, 0.4)'
+              let icon = '📦';
+              let readableName = id;
+              let customStyle: any = {};
+
+              if (id.startsWith('NodePy')) {
+                icon = '🐍';
+                readableName = `Python Sensor\n[${id.slice(-4)}]`; 
+                customStyle = { border: '2px solid #3572A5' };
+              } else if (id.startsWith('Seed-')) {
+                icon = '👑';
+                readableName = `Java Seed`;
+                customStyle = {
+                  border: '2px solid #ff0072',
+                  backgroundColor: '#3b1c28', 
+                  boxShadow: '0 0 20px rgba(255, 0, 114, 0.4)'
+                };
+              } else if (id.startsWith('JavaNode-')) {
+                icon = '☕';
+                readableName = `Java Compute\n[${id.slice(-4)}]`;
+                customStyle = { border: '2px solid #ffba08' };
+              }
+
+              // ВИПРАВЛЕННЯ: Якщо нода існує, залишаємо її координати. 
+              // Якщо нова — вираховуємо стартову позицію.
+              const position = existingNode 
+                ? existingNode.position 
+                : { 
+                    x: id.startsWith('Seed-') ? 400 : 50 + index * 250, 
+                    y: id.startsWith('Seed-') ? 100 : 300 
+                  };
+
+              return {
+                id: id,
+                type: 'meshNode', // Використовуємо наш новий дизайн
+                position: position, 
+                data: { label: readableName, icon: icon, customStyle: customStyle }
               };
-            } else if (id.startsWith('JavaNode-')) {
-              icon = '☕';
-              readableName = `Java Compute [${id.slice(-4)}]`;
-              customStyle = { border: '1px solid #ffba08' };
-            } else if (id.includes('UI') || id.includes('Dashboard')) {
-              icon = '💻';
-              readableName = `Dashboard [${id.slice(-4)}]`;
-            }
-
-            return {
-              id: id,
-              position: { 
-                x: id.startsWith('Seed-') ? 350 : 50 + index * 220, 
-                y: id.startsWith('Seed-') ? 50 : 250 
-              }, 
-              data: { label: `${icon} ${readableName}` },
-              style: customStyle
-            };
+            });
           });
 
           // 2. Формуємо Зв'язки (Edges)
-          const dynamicEdges: Edge[] = connectedEdges.map((edgeInfo, index) => {
+          const dynamicEdges: Edge[] = connectedEdges.map((edgeInfo) => {
+            const forwardKey = `${edgeInfo.source}->${edgeInfo.target}`;
+            const reverseKey = `${edgeInfo.target}->${edgeInfo.source}`;
+
+            const isActiveForward = activeStreams.includes(forwardKey);
+            const isActiveReverse = activeStreams.includes(reverseKey);
+            const isActive = isActiveForward || isActiveReverse;
+
+            let finalSource = edgeInfo.source;
+            let finalTarget = edgeInfo.target;
+
+            if (isActiveReverse && !isActiveForward) {
+                finalSource = edgeInfo.target;
+                finalTarget = edgeInfo.source;
+            }
+
             return {
-              id: `edge-${index}`,
-              source: edgeInfo.source,
-              target: edgeInfo.target,
-              animated: false, // ТЕПЕР СТАТИЧНІ
-              style: { stroke: '#555', strokeWidth: 1.5 }, // Сірий колір
+              id: `edge-${edgeInfo.source}-${edgeInfo.target}`,
+              source: finalSource,
+              target: finalTarget,
+              animated: isActive, 
+              style: { 
+                stroke: isActive ? '#00ff00' : '#555', 
+                strokeWidth: isActive ? 3 : 2 
+              }, 
             };
           });
 
-          // Оновлюємо стан React
-          setNodes(dynamicNodes);
-          setEdges(dynamicEdges); // Малюємо лінії!
+          setEdges(dynamicEdges);
           
-          console.log("Топологію оновлено!");
-
         } catch (error) {
           console.error("Помилка парсингу JSON:", error);
         }
@@ -108,35 +176,19 @@ export default function App() {
     });
   };
 
-
   // --- Слухаємо події в реальному часі ---
   const subscribeToEvents = (client: any) => {
     client.requestStream({
       data: 'SUBSCRIBE_EVENTS',
       metadata: '',
     }).subscribe({
-      onSubscribe: (sub: any) => sub.request(2147483647), // Просимо відправляти ВСІ події
+      onSubscribe: (sub: any) => sub.request(2147483647),
       onNext: (payload: any) => {
         try {
           const data = JSON.parse(payload.data);
-          console.log("Отримано подію:", data);
-
-          // Оновлюємо стилі ліній динамічно
-          setEdges((eds) => eds.map((edge) => {
-            // Якщо лінія торкається ноди, яка змінила стан
-            if (edge.source === data.nodeId || edge.target === data.nodeId) {
-              const isActive = data.event === 'STREAM_START';
-              return {
-                ...edge,
-                animated: isActive,
-                style: {
-                  stroke: isActive ? '#00ff00' : '#555', // Зелений при роботі, інакше сірий
-                  strokeWidth: isActive ? 3 : 1.5,
-                }
-              };
-            }
-            return edge;
-          }));
+          if (data.event === 'TOPOLOGY_CHANGED') {
+             fetchTopology(client);
+          }
         } catch (error) {
           console.error("Помилка парсингу події:", error);
         }
@@ -145,9 +197,9 @@ export default function App() {
     });
   };
 
-  // --- Підключення з фіксом фантомних з'єднань ---
+  // --- Підключення ---
   useEffect(() => {
-    let isMounted = true; // Прапорець життєвого циклу
+    let isMounted = true; 
     let localSocket: any = null;
 
     const connectToBackend = async () => {
@@ -175,42 +227,31 @@ export default function App() {
 
         const socket = await client.connect();
 
-        // Якщо React встиг вбити компонент поки ми підключалися — закриваємо сокет
         if (!isMounted) {
-          console.warn("Перехоплено фантомне з'єднання. Закриваємо...");
           socket.close();
           return; 
         }
 
         localSocket = socket;
         rsocketRef.current = socket;
-        console.log("Успішно підключено до Java!");
         setIsConnected(true);
 
         fetchTopology(socket);
         subscribeToEvents(socket);
 
       } catch (error) {
-        if (isMounted) {
-          console.error("Помилка підключення до Java:", error);
-          setIsConnected(false);
-        }
+        if (isMounted) setIsConnected(false);
       } finally {
-        if (isMounted) {
-          setIsConnecting(false);
-        }
+        if (isMounted) setIsConnecting(false);
       }
     };
 
     connectToBackend();
 
     return () => {
-      isMounted = false; // Сигналізуємо, що компонент знищено
-      if (localSocket) {
-        localSocket.close();
-      } else if (rsocketRef.current) {
-        rsocketRef.current.close();
-      }
+      isMounted = false; 
+      if (localSocket) localSocket.close();
+      else if (rsocketRef.current) rsocketRef.current.close();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
@@ -232,8 +273,6 @@ export default function App() {
             : '🔴 Немає з\'єднання з сервером'}
         </span>
         
-        {/* Кнопка перепідключення використовує ту саму функцію, але через реф, бо вона тепер всередині useEffect.
-            Щоб не ускладнювати код виносом функції, ми просто перезавантажуємо сторінку при ручному перепідключенні. */}
         {!isConnected && (
           <button 
             onClick={() => window.location.reload()}
@@ -250,10 +289,11 @@ export default function App() {
 
       <ReactFlow 
         nodes={nodes} edges={edges} 
-        onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}         
+        onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+        nodeTypes={nodeTypes} /* РЕЄСТРАЦІЯ КАСТОМНИХ НОД */
         colorMode="dark" fitView 
       >
-        <Background color="#fff" gap={16} />
+        <Background color="#555" gap={16} />
         <Controls />
         <MiniMap nodeColor="#00ff00" nodeStrokeWidth={3} zoomable pannable />
       </ReactFlow>

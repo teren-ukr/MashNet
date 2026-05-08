@@ -31,12 +31,13 @@ public class MeshNodeApp {
         System.out.println("=========================================");
 
         // 1. Dependency Injection (Впровадження залежностей)
+        //паттерн Composition Root
         TopologyManager topologyManager = new TopologyManager(nodeId);
-        RsocketServerManager serverManager = new RsocketServerManager(topologyManager);
-        RsocketClientManager clientManager = new RsocketClientManager(topologyManager, myPort);
-
-        // Підключаємо наш новий модуль StreamManager!
         StreamManager streamManager = new StreamManager(topologyManager);
+        RsocketClientManager clientManager = new RsocketClientManager(topologyManager, myPort, streamManager);
+        RsocketServerManager serverManager = new RsocketServerManager(topologyManager, clientManager, streamManager);
+
+
 
         // 2. Передача керування в UI-шар
         ConsoleMenu menu = new ConsoleMenu(myPort, topologyManager, serverManager, clientManager, streamManager);

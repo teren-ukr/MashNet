@@ -2,6 +2,7 @@ package com.mashnet.network.client;
 
 import com.mashnet.core.utils.JsonUtil;
 import com.mashnet.network.control.ControlCommandHandler;
+import com.mashnet.network.control.IStreamProvider;
 import com.mashnet.network.topology.TopologyManager;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -15,6 +16,7 @@ import reactor.core.publisher.Mono;
 import reactor.netty.tcp.TcpClient;
 
 import java.time.Duration;
+import java.time.InstantSource;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -26,10 +28,12 @@ public class RsocketClientManager {
 
     private final TopologyManager topologyManager;
     private final int localPort;
+    private final IStreamProvider streamProvider;
 
-    public RsocketClientManager(TopologyManager topologyManager, int localPort) {
+    public RsocketClientManager(TopologyManager topologyManager, int localPort, IStreamProvider streamProvider) {
         this.topologyManager = topologyManager;
         this.localPort = localPort;
+        this.streamProvider = streamProvider;
     }
 
     /**
@@ -67,7 +71,7 @@ public class RsocketClientManager {
             return RSocketConnector.create()
                     .setupPayload(setupPayload)
                     // Наш клієнт теж повинен вміти обробляти команди від сервера!
-                    .acceptor(io.rsocket.SocketAcceptor.with(new ControlCommandHandler(topologyManager)))
+                    .acceptor(io.rsocket.SocketAcceptor.with(new ControlCommandHandler(topologyManager, this, streamProvider)))
                     .resume(new io.rsocket.core.Resume().sessionDuration(Duration.ofMinutes(5)))
                     // TODO: Тут налаштоване авто-відновлення кожні 2 секунди
                     .reconnect(reactor.util.retry.Retry.fixedDelay(Long.MAX_VALUE, Duration.ofSeconds(2)))

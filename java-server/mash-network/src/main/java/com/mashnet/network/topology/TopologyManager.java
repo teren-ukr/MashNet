@@ -1,12 +1,11 @@
 package com.mashnet.network.topology;
 
+import io.rsocket.Payload;
 import io.rsocket.RSocket;
+import io.rsocket.util.DefaultPayload;
 import reactor.core.publisher.Sinks;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -23,6 +22,9 @@ public class TopologyManager {
 
     //глобальний список зв'язків (source -> target)
     private final List<Map<String, String>> globalEdges = new CopyOnWriteArrayList<>();
+
+    // реєстр активних потоків ( dataSource -> dataTarget )
+    private final Set<String> activeStreamEdges = ConcurrentHashMap.newKeySet();
 
     //шина подій
     private final Sinks.Many<String> eventSink = Sinks.many().multicast().directBestEffort();
@@ -124,6 +126,7 @@ public class TopologyManager {
             Map<String, Object> snapshot = new HashMap<>();
             snapshot.put("nodes", nodeList);
             snapshot.put("edges", allEdges);
+            snapshot.put("activeStreams", new ArrayList<>(activeStreamEdges));
             return snapshot;
         }
 
@@ -137,17 +140,47 @@ public class TopologyManager {
         eventSink.tryEmitNext("{\"event\": \"TOPOLOGY_CHANGED\"}");
     }
 
+    /**
+     * Оновлює статус потоку і запускає ланцюгову реакцію (Gossip) по мережі.
+     * Повертає true, якщо стан дійсно змінився (захист від нескінченних циклів).
+     */
+    public boolean setStreamStatusAndBroadcast(String dataSource, String dataTarget, boolean isActive) {
+        String edgeId = dataSource + "->" + dataTarget;
+        boolean changed;
+
+        if (isActive) {
+            changed = activeStreamEdges.add(edgeId);
+        } else {
+            changed = activeStreamEdges.remove(edgeId);
+        }
+
+        if (changed) {
+            // Сповіщаємо локальний UI та інші модулі (викличе TOPOLOGY_CHANGED)
+            broadcastTopologyChange();
+
+            // Відправляємо Gossip сусідам
+            String json = "{\"dataSource\":\"" + dataSource + "\", \"dataTarget\":\"" + dataTarget + "\", \"isActive\":" + isActive + "}";
+            for (Map.Entry<String, io.rsocket.RSocket> entry : activeConections.entrySet()) {
+                String neighborId = entry.getKey();
+                if (!neighborId.contains("Dashboard") && !neighborId.contains("UI")) {
+                    io.rsocket.Payload payload = io.rsocket.util.DefaultPayload.create("STREAM_EVENT", json);
+                    entry.getValue().fireAndForget(payload).subscribe();
+                }
+            }
+        }
+        return changed;
+    }
+
+
+
 
     // ---- GETTERS ---- ///
-
     public Sinks.Many<String> getEventSink() {
         return eventSink;
     }
-
     public Map<String, RSocket> getActiveConnections() {
         return activeConections;
     }
-
     public String getLocalNodeId() {
         return localNodeId;
     }
