@@ -65,7 +65,11 @@ public class StreamManager implements IStreamProvider {
             if (targetNodeId.contains("Dashboard") || targetNodeId.contains("UI")) return;
             if (activeStreams.containsKey(targetNodeId) && !activeStreams.get(targetNodeId).isDisposed()) return;
 
-            topologyManager.getEventSink().tryEmitNext("{\"event\": \"STREAM_START\", \"nodeId\": \"" + targetNodeId + "\"}");
+            //id поточної ноди
+            String myNodeId = topologyManager.getLocalNodeId();
+
+            //позначаємо потік активним
+            topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, true);
 
             var rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
                     .map(payload -> Double.parseDouble(payload.getDataUtf8()));
@@ -76,20 +80,22 @@ public class StreamManager implements IStreamProvider {
             // 2. Зберігаємо його в пам'ять, щоб інші ноди могли до нього підключитися
             processedOutputs.put(targetNodeId, sharedStream);
 
-            //позначаємо потік активним
-            topologyManager.setStreamStatus(targetNodeId, true);
+
+
 
             // 3. Запускаємо потік
             Disposable streamDisposable = sharedStream
                     .doOnError(e -> System.err.println(">>> [STREAM] Зв'язок з нодою " + targetNodeId + " втрачено."))
                     .onErrorResume(e -> Mono.empty())
                     .doFinally(signalType -> {
-                        //позначаємо потік неактивним
-                        topologyManager.setStreamStatus(targetNodeId, false);
 
+                        // ПРИ ЗУПИНЦІ робимо потік неактивним
+                        topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, false);
                         // Очищаємо пам'ять при зупинці
                         processedOutputs.remove(targetNodeId);
-                        topologyManager.getEventSink().tryEmitNext("{\"event\": \"STREAM_STOP\", \"nodeId\": \"" + targetNodeId + "\"}");
+
+
+
 
                         if (signalType == SignalType.CANCEL) {
                             System.out.println(">>> [STREAM] Потік призупинено (Нода " + targetNodeId + " залишається на зв'язку).");

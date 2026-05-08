@@ -74,6 +74,7 @@ public class ControlCommandHandler implements RSocket {
 
         // --- Команди без відповіді (Fire-And-Forget) ---
         fireAndForgetCommands.put("NEW_EDGE", new NewEdgeCommand(topologyManager));
+        fireAndForgetCommands.put("STREAM_EVENT", new StreamEventCommand(topologyManager));
     }
 
     /**
