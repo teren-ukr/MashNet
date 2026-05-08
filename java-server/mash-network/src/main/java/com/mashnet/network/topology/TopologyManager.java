@@ -102,17 +102,17 @@ public class TopologyManager {
      * Генерує повну карту мережі для відправки на Дашборд.
      * Об'єднує прямі підключення та глобальні плітки (Mesh).
      *
-     * @return Map зі списками "nodes" (вузли) та "edges" (зв'язки).
+     * @return Map зі списками "nodes", "edges" та "activeStreams".
      */
     public Map<String, Object> getTopologySnapshot(){
-        //збираємо всіх прямих сусідів і себе
+        // 1. Збираємо всіх прямих сусідів і себе
         List<String> nodeList = new ArrayList<>(activeConections.keySet());
         nodeList.add(localNodeId);
 
-        //збираємо всі чутки про інші ноди
+        // 2. Збираємо всі чутки про інші ноди (Gossip)
         List<Map<String, String>> allEdges = new ArrayList<>(globalEdges);
 
-        //додаємо прямі зв'язки, яких нема в чутках
+        // 3. Додаємо прямі зв'язки, яких нема в чутках
         for(String connectedNode : activeConections.keySet()){
             Map<String, String> edge = new HashMap<>();
             edge.put("source", connectedNode);
@@ -121,16 +121,15 @@ public class TopologyManager {
             if(!allEdges.contains(edge)){
                 allEdges.add(edge);
             }
+        } // <--- ЦИКЛ ЗАКІНЧУЄТЬСЯ ТУТ. Ми перебрали ВСІХ сусідів!
 
-            //пакуємо об'єкт для подальшої конвертації в json
-            Map<String, Object> snapshot = new HashMap<>();
-            snapshot.put("nodes", nodeList);
-            snapshot.put("edges", allEdges);
-            snapshot.put("activeStreams", new ArrayList<>(activeStreamEdges));
-            return snapshot;
-        }
+        // 4. Пакуємо об'єкт для подальшої конвертації в JSON
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("nodes", nodeList);
+        snapshot.put("edges", allEdges);
+        snapshot.put("activeStreams", new ArrayList<>(activeStreamEdges));
 
-        return null;
+        return snapshot; // Повертаємо повноцінний зліпок
     }
 
     /**
