@@ -1,5 +1,6 @@
 package com.mashnet.network.topology;
 
+import com.mashnet.core.models.ComputationSchema;
 import io.rsocket.Payload;
 import io.rsocket.RSocket;
 import io.rsocket.util.DefaultPayload;
@@ -28,6 +29,9 @@ public class TopologyManager {
 
     //шина подій
     private final Sinks.Many<String> eventSink = Sinks.many().multicast().directBestEffort();
+
+    // Зберігаємо поточну задачу (схему), яку виконує нода
+    private ComputationSchema currentSchema;
 
 
     /**
@@ -182,5 +186,15 @@ public class TopologyManager {
     }
     public String getLocalNodeId() {
         return localNodeId;
+    }
+
+    // Геттер та Сеттер для схеми
+    public void setCurrentSchema(ComputationSchema schema) {
+        this.currentSchema = schema;
+        System.out.println(">>> [TOPOLOGY] Схему оновлено. Поточна операція: " +
+                (schema != null ? schema.operation : "НЕМАЄ"));
+    }
+    public ComputationSchema getCurrentSchema() {
+        return currentSchema;
     }
 }

@@ -3,6 +3,7 @@ package com.mashnet.network.control;
 import com.mashnet.core.models.ComputationSchema;
 import com.mashnet.core.utils.JsonUtil;
 import com.mashnet.network.client.RsocketClientManager;
+import com.mashnet.network.topology.TopologyManager;
 import io.rsocket.Payload;
 import io.rsocket.util.DefaultPayload;
 import reactor.core.publisher.Mono;
@@ -13,34 +14,34 @@ import reactor.core.publisher.Mono;
  */
 public class LoadSchemaCommand implements IControlCommand {
 
-    public final RsocketClientManager clientManager;
+    private final RsocketClientManager clientManager;
+    private final TopologyManager topologyManager; // ДОДАНО ПОЛЕ
 
-    public LoadSchemaCommand(RsocketClientManager clientManager) {
+    // Оновлюємо конструктор
+    public LoadSchemaCommand(RsocketClientManager clientManager, TopologyManager topologyManager) {
         this.clientManager = clientManager;
+        this.topologyManager = topologyManager;
     }
 
     @Override
     public Mono<Payload> execute(Payload payload, String localNodeId) {
-
-        // Схема передається у Metadata, оскільки Data зайнята іменем команди ("LOAD_SCHEMA")
         String jsonSchema = payload.getMetadataUtf8();
 
         try {
-            // Спроба розпарсити JSON у строгий типізований об'єкт Java
             ComputationSchema schema = JsonUtil.MAPPER.readValue(jsonSchema, ComputationSchema.class);
             System.out.println("[" + localNodeId + "] Схему [" + schema.schemaId + "] успішно завантажено.");
 
-            // Якщо в схемі вказано, що джерело це порт (наприклад "port:8005")
-            if(schema.inputSource.startsWith("port:")){
+            // 1. ЗБЕРІГАЄМО СХЕМУ
+            topologyManager.setCurrentSchema(schema);
+
+            // 2. АВТО-ПІДКЛЮЧЕННЯ (твій існуючий код)
+            if (schema.inputSource != null && schema.inputSource.startsWith("port:")) {
                 int port = Integer.parseInt(schema.inputSource.replace("port:", ""));
                 System.out.println("[" + localNodeId + "] Авто-підключення до джерела на порту " + port);
-
-                // Використовуємо менеджер, щоб ініціювати TCP з'єднання
                 clientManager.connectToNeighbor(port);
             }
 
             return Mono.just(DefaultPayload.create("SCHEMA_LOADED_OK"));
-
         } catch (Exception e) {
             System.err.println("[" + localNodeId + "] Помилка парсингу JSON схеми: " + e.getMessage());
             return Mono.just(DefaultPayload.create("ERROR: BAD_JSON"));

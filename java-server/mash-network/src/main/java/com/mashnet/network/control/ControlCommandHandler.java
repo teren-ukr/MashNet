@@ -51,7 +51,7 @@ public class ControlCommandHandler implements RSocket {
     private void registerCommands() {
         // --- Складні команди (Request-Response) винесені в окремі класи ---
         requestResponseCommands.put("GET_TOPOLOGY", new GetTopologyCommand(topologyManager));
-        requestResponseCommands.put("LOAD_SCHEMA", new LoadSchemaCommand(clientManager));
+        requestResponseCommands.put("LOAD_SCHEMA", new LoadSchemaCommand(clientManager, topologyManager));
 
         // --- Прості системні команди залишені як лямбда-вирази для компактності ---
         requestResponseCommands.put("WHO_ARE_YOU", (payload, nodeId) ->
