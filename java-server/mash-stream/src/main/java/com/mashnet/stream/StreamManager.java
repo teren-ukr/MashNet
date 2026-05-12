@@ -1,9 +1,12 @@
 package com.mashnet.stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mashnet.core.models.ComputationSchema;
 import com.mashnet.core.utils.JsonUtil;
 import com.mashnet.network.control.IStreamProvider;
 import com.mashnet.network.topology.TopologyManager;
+import com.mashnet.stream.math.IMathStrategy;
+import com.mashnet.stream.math.MathStrategyFactory;
 import com.mashnet.stream.sink.DataAggregatorSink;
 import io.rsocket.RSocket;
 import io.rsocket.util.DefaultPayload;
@@ -24,6 +27,7 @@ public class StreamManager implements IStreamProvider {
 
     private final TopologyManager topologyManager;
     private final DataAggregatorSink dataAggregator;
+    private final MathStrategyFactory mathFactory;
 
     // Реєстр активних "пультів керування" (Disposable)
     private final Map<String, Disposable> activeStreams = new ConcurrentHashMap<>();
@@ -34,6 +38,7 @@ public class StreamManager implements IStreamProvider {
     public StreamManager(TopologyManager topologyManager) {
         this.topologyManager = topologyManager;
         this.dataAggregator = new DataAggregatorSink();
+        this.mathFactory = new MathStrategyFactory();
         listenToNetworkEvents();
     }
 
@@ -51,6 +56,9 @@ public class StreamManager implements IStreamProvider {
         });
     }
 
+    /**
+     * запускає всіпотоки даних
+     */
     public void startAllSensorStreams() {
         Map<String, RSocket> connections = topologyManager.getActiveConnections();
 
@@ -65,21 +73,27 @@ public class StreamManager implements IStreamProvider {
             if (targetNodeId.contains("Dashboard") || targetNodeId.contains("UI")) return;
             if (activeStreams.containsKey(targetNodeId) && !activeStreams.get(targetNodeId).isDisposed()) return;
 
+
+            //Дістаємо поточну схему з TopologyManager
+            ComputationSchema currentSchema = topologyManager.getCurrentSchema();
+
+            // Якщо схеми немає (хтось натиснув SENSOR до LOAD_SCHEMA), ставимо дефолт
+            String operation = (currentSchema != null && currentSchema.operation != null)
+                    ? currentSchema.operation
+                    : "AVERAGE";
+
+            //витянгуємо стратегію
+            IMathStrategy strategy = mathFactory.getStrategy(operation);
+
             //id поточної ноди
             String myNodeId = topologyManager.getLocalNodeId();
-
-            //позначаємо потік активним
             topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, true);
 
             var rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
                     .map(payload -> Double.parseDouble(payload.getDataUtf8()));
 
-            // 1. Отримуємо потік від математичного модуля і робимо його "ГАРЯЧИМ" через .share()
-            Flux<Double> sharedStream = dataAggregator.processStream(rawStream, targetNodeId).share();
-
-            // 2. Зберігаємо його в пам'ять, щоб інші ноди могли до нього підключитися
-            processedOutputs.put(targetNodeId, sharedStream);
-
+            //передаємо стратегію
+            Flux<Double> sharedStream = dataAggregator.processStream(rawStream, targetNodeId, strategy).share();
 
 
 
@@ -93,8 +107,6 @@ public class StreamManager implements IStreamProvider {
                         topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, false);
                         // Очищаємо пам'ять при зупинці
                         processedOutputs.remove(targetNodeId);
-
-
 
 
                         if (signalType == SignalType.CANCEL) {

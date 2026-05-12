@@ -62,6 +62,7 @@ public class ConsoleMenu {
                 case "SEND" -> broadcastLoadSchema();
                 case "PORTS" -> printPorts();
                 case "SENSOR" -> streamManager.startAllSensorStreams();
+
                 // Зверни увагу: метод stopAllStreams потрібно додати в StreamManager!
                 case "STOP" -> System.out.println(">>> Зупинка потоків...");
                 case "RESET" -> broadcastReset();
@@ -108,7 +109,13 @@ public class ConsoleMenu {
         }
 
         System.out.println("Розсилка JSON LOAD_SCHEMA всім сусідам (" + connections.size() + ")...");
-        ComputationSchema mySchema = new ComputationSchema("task-math-01", "MULTIPLY", "port:7001", "port:7002");
+
+        ComputationSchema mySchema = new ComputationSchema(
+                "task-math-01",
+                "MULTIPLY",
+                "port:8005",
+                "port:7002"
+        );
 
         try {
             String jsonSchema = JsonUtil.MAPPER.writeValueAsString(mySchema);
