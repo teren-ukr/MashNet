@@ -15,12 +15,13 @@ import reactor.core.publisher.Mono;
 public class LoadSchemaCommand implements IControlCommand {
 
     private final RsocketClientManager clientManager;
-    private final TopologyManager topologyManager; // ДОДАНО ПОЛЕ
+    private final TopologyManager topologyManager;
+    private final IStreamProvider streamManager;
 
-    // Оновлюємо конструктор
-    public LoadSchemaCommand(RsocketClientManager clientManager, TopologyManager topologyManager) {
+    public LoadSchemaCommand(RsocketClientManager clientManager, TopologyManager topologyManager, IStreamProvider streamManager) {
         this.clientManager = clientManager;
         this.topologyManager = topologyManager;
+        this.streamManager = streamManager;
     }
 
     @Override
@@ -34,11 +35,15 @@ public class LoadSchemaCommand implements IControlCommand {
             // 1. ЗБЕРІГАЄМО СХЕМУ
             topologyManager.setCurrentSchema(schema);
 
-            // 2. АВТО-ПІДКЛЮЧЕННЯ (твій існуючий код)
-            if (schema.inputSource != null && schema.inputSource.startsWith("port:")) {
-                int port = Integer.parseInt(schema.inputSource.replace("port:", ""));
-                System.out.println("[" + localNodeId + "] Авто-підключення до джерела на порту " + port);
-                clientManager.connectToNeighbor(port);
+            // 2. АВТО-ЗАПУСК ПОТОКУ АБО ПІДКЛЮЧЕННЯ
+            if (schema.inputSource != null) {
+                if (schema.inputSource.startsWith("NodePy")) {
+                    // Якщо джерело - це Python сенсор, миттєво відкриваємо RSocket потік
+                    streamManager.startStreamFrom(schema.inputSource);
+                } else if (schema.inputSource.startsWith("port:")) {
+                    int port = Integer.parseInt(schema.inputSource.replace("port:", ""));
+                    clientManager.connectToNeighbor(port);
+                }
             }
 
             return Mono.just(DefaultPayload.create("SCHEMA_LOADED_OK"));

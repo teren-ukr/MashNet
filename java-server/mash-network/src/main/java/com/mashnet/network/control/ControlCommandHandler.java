@@ -49,13 +49,47 @@ public class ControlCommandHandler implements RSocket {
      * Зв'язує текстовий ідентифікатор команди (String) з її обробником (Клас або Лямбда).
      */
     private void registerCommands() {
-        // --- Складні команди (Request-Response) винесені в окремі класи ---
         requestResponseCommands.put("GET_TOPOLOGY", new GetTopologyCommand(topologyManager));
-        requestResponseCommands.put("LOAD_SCHEMA", new LoadSchemaCommand(clientManager, topologyManager));
+        requestResponseCommands.put("LOAD_SCHEMA", new LoadSchemaCommand(clientManager, topologyManager, streamProvider));
 
-        // --- Прості системні команди залишені як лямбда-вирази для компактності ---
-        requestResponseCommands.put("WHO_ARE_YOU", (payload, nodeId) ->
-                Mono.just(DefaultPayload.create(nodeId)));
+        requestResponseCommands.put("DEPLOY_SCHEMA", (payload, nodeId) -> {
+            try {
+                com.fasterxml.jackson.databind.JsonNode request = com.mashnet.core.utils.JsonUtil.MAPPER.readTree(payload.getMetadataUtf8());
+                String targetId = request.get("targetNode").asText();
+                String schemaJson = request.get("schema").toString();
+
+                System.out.println("\n[DASHBOARD] Запит на розгортання схеми на вузлі: " + targetId);
+
+                if (targetId.equals(topologyManager.getLocalNodeId())) {
+                    Payload localPayload = DefaultPayload.create("LOAD_SCHEMA", schemaJson);
+                    return new LoadSchemaCommand(clientManager, topologyManager, streamProvider).execute(localPayload, nodeId);
+                } else {
+                    RSocket targetSocket = topologyManager.getActiveConnections().get(targetId);
+                    if (targetSocket != null) {
+                        return targetSocket.requestResponse(DefaultPayload.create("LOAD_SCHEMA", schemaJson));
+                    } else {
+                        return Mono.just(DefaultPayload.create("ERROR: Вузол " + targetId + " не знайдено"));
+                    }
+                }
+            } catch (Exception e) {
+                return Mono.just(DefaultPayload.create("ERROR: " + e.getMessage()));
+            }
+        });
+
+        fireAndForgetCommands.put("STOP_ALL", (payload, nodeId) -> {
+            System.out.println("\n[DASHBOARD] Команда STOP_ALL. Зупиняємо потоки.");
+            if (streamProvider != null) {
+                streamProvider.stopAllStreams();
+            }
+            topologyManager.getActiveConnections().forEach((id, socket) -> {
+                if(id.startsWith("JavaNode") || id.startsWith("Seed")) {
+                    socket.requestResponse(DefaultPayload.create("STOP")).subscribe();
+                }
+            });
+            return Mono.empty();
+        });
+
+        requestResponseCommands.put("WHO_ARE_YOU", (payload, nodeId) -> Mono.just(DefaultPayload.create(nodeId)));
 
         requestResponseCommands.put("START", (payload, nodeId) -> {
             System.out.println("[" + nodeId + "] -> Запуск обчислень згідно зі схемою...");
@@ -64,15 +98,17 @@ public class ControlCommandHandler implements RSocket {
 
         requestResponseCommands.put("STOP", (payload, nodeId) -> {
             System.out.println("[" + nodeId + "] -> Зупинка поточних обчислень...");
+            if (streamProvider != null) streamProvider.stopAllStreams();
             return Mono.just(DefaultPayload.create("NODE_STOPPED"));
         });
 
         requestResponseCommands.put("RESET", (payload, nodeId) -> {
             System.out.println("\n[" + nodeId + "] Скидання схеми обчислень...");
+            topologyManager.setCurrentSchema(null);
+            if (streamProvider != null) streamProvider.stopAllStreams();
             return Mono.just(DefaultPayload.create("RESET_OK"));
         });
 
-        // --- Команди без відповіді (Fire-And-Forget) ---
         fireAndForgetCommands.put("NEW_EDGE", new NewEdgeCommand(topologyManager));
         fireAndForgetCommands.put("STREAM_EVENT", new StreamEventCommand(topologyManager));
     }
@@ -85,12 +121,9 @@ public class ControlCommandHandler implements RSocket {
         String commandName = payload.getDataUtf8();
         IFireAndForgetCommand command = fireAndForgetCommands.get(commandName);
 
-        // Якщо команду знайдено у реєстрі — виконуємо її
-        if (command != null) {
+        if (command != null)
             return command.execute(payload, topologyManager.getLocalNodeId());
-        }
 
-        // Якщо команда невідома, просто ігноруємо (fail-safe підхід)
         return Mono.empty();
     }
 
@@ -101,23 +134,14 @@ public class ControlCommandHandler implements RSocket {
     public Mono<Payload> requestResponse(Payload payload) {
         String commandName = payload.getDataUtf8();
 
-        // Особлива логіка для LOAD_SCHEMA: оскільки сама схема лежить у Metadata,
-        // клієнт може передати в Data щось на зразок LOAD_SCHEMA_123 тому перевіряємо по префіксу.
-        if (commandName.startsWith("LOAD_SCHEMA")) {
+        if (commandName.startsWith("LOAD_SCHEMA"))
             commandName = "LOAD_SCHEMA";
-        }
-
-        System.out.println("\n[" + topologyManager.getLocalNodeId() + "] Отримано команду: " + commandName);
 
         IControlCommand command = requestResponseCommands.get(commandName);
 
-        if (command != null) {
-            // Передаємо виконання конкретній стратегії
+        if (command != null)
             return command.execute(payload, topologyManager.getLocalNodeId());
-        }
 
-        // Якщо команда невідома, повертаємо клієнту помилку
-        System.err.println("[" + topologyManager.getLocalNodeId() + "] Невідома команда: " + commandName);
         return Mono.just(DefaultPayload.create("ERROR: UNKNOWN_COMMAND"));
     }
 
@@ -129,19 +153,16 @@ public class ControlCommandHandler implements RSocket {
     public Flux<Payload> requestStream(Payload payload) {
         String command = payload.getDataUtf8();
 
-        if ("SUBSCRIBE_EVENTS".equals(command)) {
-            System.out.println("[" + topologyManager.getLocalNodeId() + "] Дашборд підписався на живі події мережі!");
-            // Транслюємо нашу шину подій (Sinks.Many) у реактивний потік Flux
-            return topologyManager.getEventSink().asFlux().map(DefaultPayload::create);
-        }
+        if ("SUBSCRIBE_EVENTS".equals(command))
+            return topologyManager
+                    .getEventSink()
+                    .asFlux()
+                    .map(DefaultPayload::create);
 
-        // TODO: Додати обробку "START_SENSOR", коли буде створено StreamManager
-        if ("START_SENSOR".equals(command)) {
-            // У реальному коді тут треба шукати потрібний ID, поки що беремо заглушку "TODO"
-            return streamProvider.getProcessedStream("TODO")
+        if ("START_SENSOR".equals(command))
+            return streamProvider
+                    .getProcessedStream("TODO")
                     .map(value -> DefaultPayload.create(String.valueOf(value)));
-        }
-
 
         return Flux.error(new IllegalArgumentException("Невідома команда потоку: " + command));
     }
