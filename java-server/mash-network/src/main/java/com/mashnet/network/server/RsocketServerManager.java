@@ -5,8 +5,12 @@ import com.mashnet.network.control.ControlCommandHandler;
 import com.mashnet.network.control.IStreamProvider;
 import com.mashnet.network.topology.TopologyManager;
 
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.ssl.ClientAuth;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.rsocket.core.RSocketServer;
 import io.rsocket.transport.netty.server.TcpServerTransport;
@@ -14,6 +18,8 @@ import io.rsocket.transport.netty.server.WebsocketServerTransport;
 import reactor.core.publisher.Mono;
 import reactor.netty.tcp.TcpServer;
 
+import java.io.File;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -37,46 +43,83 @@ public class RsocketServerManager {
     }
 
     /**
-     * Запускає захищений SSL TCP-сервер для спілкування між Java-нодами та Python-датчиками.
-     *
-     * @param port порт, на якому буде слухати сервер (наприклад, 7000).
+     * Запускає захищений SSL TCP-сервер (mTLS).
      */
-    public void startTcpServer(int port){
+    public void startTcpServer(int port) {
         try {
+            // 1. Вказуємо шляхи до згенерованих сертифікатів
+            File serverCert = new File("certs/server1.crt");
+            File serverKey = new File("certs/server1.key");
+            File caCert = new File("certs/ca.crt");
 
-            //генерація тимсасового ssl сертифіката для тестування в локалхості
-            SelfSignedCertificate ssc = new SelfSignedCertificate();
-            SslContext sslContext = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
+            if (!serverCert.exists() || !serverKey.exists() || !caCert.exists()) {
+                System.err.println("[FATAL] Сертифікати не знайдено у папці certs/. Запуск неможливий.");
+                return;
+            }
 
+            System.out.println(">>> [SECURITY] Ініціалізація суворого mTLS для сервера...");
+
+            // 2. Створюємо SSL Контекст з вимогою клієнтського сертифіката
+            SslContext sslContext = SslContextBuilder.forServer(serverCert, serverKey)
+                    .trustManager(caCert) // Довіряємо ТІЛЬКИ нашому Local CA
+                    .clientAuth(ClientAuth.REQUIRE) // Блокуємо всіх, хто не має сертифіката
+                    .build();
+
+            // 3. Налаштовуємо Netty TCP Сервер
             TcpServer tcpServer = TcpServer.create()
-                    .host("localhost")
+                    // ВАЖЛИВО: 0.0.0.0 дозволяє приймати з'єднання ззовні (через IP Vagrant-мережі)
+                    .host("0.0.0.0")
                     .port(port)
-                    .secure(ssl -> ssl.sslContext(sslContext));
+                    .secure(ssl -> ssl.sslContext(sslContext))
+                    // Перехоплювач на рівні L6 (TLS), щоб дістати UUID до того, як включиться RSocket
+                    .doOnConnection(connection -> {
+                        connection.addHandlerLast(new ChannelInboundHandlerAdapter() {
+                            @Override
+                            public void channelActive(ChannelHandlerContext ctx) throws Exception {
+                                SslHandler sslHandler = ctx.pipeline().get(SslHandler.class);
+                                if (sslHandler != null) {
+                                    sslHandler.handshakeFuture().addListener(future -> {
+                                        if (future.isSuccess()) {
+                                            try {
+                                                // Витягуємо сертифікат сенсора
+                                                X509Certificate clientCert = (X509Certificate) sslHandler.engine().getSession().getPeerCertificates()[0];
+                                                String distinguishedName = clientCert.getSubjectDN().getName();
+                                                System.out.println(">>> [SECURITY] mTLS Успішно! Підключено пристрій з DN: " + distinguishedName);
+                                                // Тепер ми криптографічно впевнені, хто до нас підключився
+                                            } catch (Exception e) {
+                                                System.err.println("[SECURITY] Помилка читання сертифіката: " + e.getMessage());
+                                            }
+                                        }
+                                    });
+                                }
+                                super.channelActive(ctx);
+                            }
+                        });
+                    });
 
+            // 4. Піднімаємо RSocket поверх безпечного TCP-тунелю
             RSocketServer.create()
                     .acceptor((setup, sendingSocket) -> {
+                        // Оскільки ми вже пройшли mTLS, ми можемо довіряти ID, що прийшов у Setup
                         String remoteNodeId = setup.getDataUtf8();
-
-                        // Реєструємо підключення в менеджері топології
                         topologyManager.addConnection(remoteNodeId, sendingSocket);
 
-                        // відстежуємо ВІДКЛЮЧЕННЯ ноди для Garbage Collector графа
                         sendingSocket.onClose().subscribe(
                                 null,
                                 err -> topologyManager.handleDisconnection(remoteNodeId),
                                 () -> topologyManager.handleDisconnection(remoteNodeId)
                         );
 
-                        // Повертаємо наш маршрутизатор як обробник усіх наступних повідомлень
                         return Mono.just(new ControlCommandHandler(topologyManager, clientManager, streamProvider));
+                        // ПРИМІТКА: Тут передається null для streamManager тимчасово, щоб код компілювався за попередньою структурою.
+                        // Коли ми додамо StreamManager сюди повноцінно, ми його прокинемо.
                     })
                     .resume(new io.rsocket.core.Resume().sessionDuration(Duration.ofMinutes(5)))
                     .bind(TcpServerTransport.create(tcpServer))
                     .subscribe(v -> System.out.println(">>> [SERVER] SSL TCP Сервер слухає на порту " + port));
 
-        }
-        catch (Exception e) {
-            throw new RuntimeException(e);
+        } catch (Exception e) {
+            throw new RuntimeException("Помилка запуску сервера: " + e.getMessage(), e);
         }
     }
 

@@ -15,6 +15,7 @@ import io.rsocket.util.DefaultPayload;
 import reactor.core.publisher.Mono;
 import reactor.netty.tcp.TcpClient;
 
+import java.io.File;
 import java.time.Duration;
 import java.time.InstantSource;
 import java.util.HashMap;
@@ -29,6 +30,7 @@ public class RsocketClientManager {
     private final TopologyManager topologyManager;
     private final int localPort;
     private final IStreamProvider streamProvider;
+
 
     public RsocketClientManager(TopologyManager topologyManager, int localPort, IStreamProvider streamProvider) {
         this.topologyManager = topologyManager;
@@ -58,22 +60,30 @@ public class RsocketClientManager {
         Payload setupPayload = DefaultPayload.create(topologyManager.getLocalNodeId(), String.valueOf(localPort));
 
         try {
-            // Довіряємо самопідписаним сертифікатам
+            // Шляхи до НАШИХ сертифікатів (ми виступаємо як клієнт)
+            File clientCert = new File("certs/server1.crt");
+            File clientKey = new File("certs/server1.key");
+            File caCert = new File("certs/ca.crt");
+
+            // Налаштовуємо mTLS для клієнта
             SslContext sslContext = SslContextBuilder.forClient()
-                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                    .keyManager(clientCert, clientKey) // Надаємо наш сертифікат для перевірки
+                    .trustManager(caCert) // Перевіряємо сервер за допомогою CA
                     .build();
 
+            // ВАЖЛИВО: Підключаємось до IP віртуалки або Seed-ноди.
+            // Для локального тесту на віртуалці використовуємо localhost, але
+            // якщо ми стукаємо до іншої віртуалки (напр. Seed), треба передавати її IP.
+            // Поки залишимо localhost, якщо вони на одній машині, але для меш-мережі сюди треба передавати IP.
             TcpClient tcpClient = TcpClient.create()
-                    .host("localhost")
+                    .host("0.0.0.0") // Для тестування. Потім замінимо на змінну host
                     .port(port)
                     .secure(ssl -> ssl.sslContext(sslContext));
 
             return RSocketConnector.create()
                     .setupPayload(setupPayload)
-                    // Наш клієнт теж повинен вміти обробляти команди від сервера!
                     .acceptor(io.rsocket.SocketAcceptor.with(new ControlCommandHandler(topologyManager, this, streamProvider)))
                     .resume(new io.rsocket.core.Resume().sessionDuration(Duration.ofMinutes(5)))
-                    // TODO: Тут налаштоване авто-відновлення кожні 2 секунди
                     .reconnect(reactor.util.retry.Retry.fixedDelay(Long.MAX_VALUE, Duration.ofSeconds(2)))
                     .connect(TcpClientTransport.create(tcpClient));
         } catch (Exception e) {

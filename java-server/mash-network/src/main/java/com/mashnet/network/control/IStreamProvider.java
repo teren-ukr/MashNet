@@ -8,4 +8,8 @@ import reactor.core.publisher.Flux;
  */
 public interface IStreamProvider {
     Flux<Double> getProcessedStream(String sourceId);
+
+    void startStreamFrom(String targetNodeId);
+    void stopAllStreams();
 }
+

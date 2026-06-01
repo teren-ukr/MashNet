@@ -121,6 +121,57 @@ public class StreamManager implements IStreamProvider {
         });
     }
 
+
+    /**
+     * Запускає потік від конкретного сенсора.
+     * Обов'язкова реалізація методу з інтерфейсу IStreamProvider.
+     */
+    @Override
+    public void startStreamFrom(String targetNodeId) {
+        Map<String, RSocket> connections = topologyManager.getActiveConnections();
+        RSocket rsocket = connections.get(targetNodeId);
+
+        if (rsocket == null) {
+            System.err.println("!!! Помилка: Вузол " + targetNodeId + " не знайдено для запуску потоку.");
+            return;
+        }
+
+        if (activeStreams.containsKey(targetNodeId) && !activeStreams.get(targetNodeId).isDisposed()) {
+            System.out.println(">>> [STREAM] Потік з " + targetNodeId + " вже активний.");
+            return;
+        }
+
+        ComputationSchema currentSchema = topologyManager.getCurrentSchema();
+        String operation = (currentSchema != null && currentSchema.operation != null) ? currentSchema.operation : "AVERAGE";
+        IMathStrategy strategy = mathFactory.getStrategy(operation);
+
+        String myNodeId = topologyManager.getLocalNodeId();
+        topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, true);
+
+        System.out.println(">>> [STREAM] Відкриваємо канал Request-Stream до " + targetNodeId);
+
+        var rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
+                .map(payload -> Double.parseDouble(payload.getDataUtf8()));
+
+        Flux<Double> sharedStream = dataAggregator.processStream(rawStream, targetNodeId, strategy).share();
+
+        Disposable streamDisposable = sharedStream
+                .doOnError(e -> System.err.println(">>> [STREAM] Зв'язок з нодою " + targetNodeId + " втрачено."))
+                .onErrorResume(e -> Mono.empty())
+                .doFinally(signalType -> {
+                    topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, false);
+                    processedOutputs.remove(targetNodeId);
+                    if (signalType == SignalType.CANCEL) {
+                        System.out.println(">>> [STREAM] Потік призупинено (Нода " + targetNodeId + " залишається на зв'язку).");
+                    } else {
+                        System.out.println(">>> [STREAM] Потік завершився для ноди " + targetNodeId);
+                    }
+                })
+                .subscribe();
+
+        activeStreams.put(targetNodeId, streamDisposable);
+    }
+
     /**
      * Реалізація інтерфейсу IStreamProvider.
      * Віддає вже існуючий потік обчислень для передачі по мережі.
@@ -135,6 +186,11 @@ public class StreamManager implements IStreamProvider {
         return processedOutputs.getOrDefault(sourceId, Flux.empty());
     }
 
+    /**
+     * Зупиняє всі активні потоки.
+     * Обов'язкова реалізація методу з інтерфейсу IStreamProvider.
+     */
+    @Override
     public void stopAllStreams() {
         if (activeStreams.isEmpty()) {
             System.out.println(">>> [STREAM] Немає активних потоків для зупинки.");
@@ -151,6 +207,7 @@ public class StreamManager implements IStreamProvider {
         activeStreams.clear();
         processedOutputs.clear(); // Очищаємо буфер потоків
     }
+
 
     private void stopStreamForNode(String nodeId) {
         Disposable stream = activeStreams.remove(nodeId);
