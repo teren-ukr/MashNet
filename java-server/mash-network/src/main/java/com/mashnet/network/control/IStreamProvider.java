@@ -11,5 +11,7 @@ public interface IStreamProvider {
 
     void startStreamFrom(String targetNodeId);
     void stopAllStreams();
+
+    void startPipeline();
 }
 

@@ -1,10 +1,11 @@
 package com.mashnet.stream.elements;
 
 import reactor.core.publisher.Flux;
+import java.util.Map;
 
 public interface IMeshSource<T> {
     /**
-     * Повертає вихідний реактивний потік даних.
+     * Повертає карту вихідних реактивних потоків даних.
      */
-    Flux<T> getOutputStream();
+    Map<String, Flux<T>> getOutputStreams();
 }

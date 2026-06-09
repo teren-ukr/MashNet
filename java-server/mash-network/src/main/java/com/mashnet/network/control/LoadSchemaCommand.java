@@ -32,18 +32,22 @@ public class LoadSchemaCommand implements IControlCommand {
             ComputationSchema schema = JsonUtil.MAPPER.readValue(jsonSchema, ComputationSchema.class);
             System.out.println("[" + localNodeId + "] Схему [" + schema.schemaId + "] успішно завантажено.");
 
-            // 1. ЗБЕРІГАЄМО СХЕМУ
+            // 1. Зберігаємо схему
             topologyManager.setCurrentSchema(schema);
 
-            // 2. АВТО-ЗАПУСК ПОТОКУ АБО ПІДКЛЮЧЕННЯ
-            if (schema.inputSource != null) {
-                if (schema.inputSource.startsWith("NodePy")) {
-                    // Якщо джерело - це Python сенсор, миттєво відкриваємо RSocket потік
-                    streamManager.startStreamFrom(schema.inputSource);
-                } else if (schema.inputSource.startsWith("port:")) {
-                    int port = Integer.parseInt(schema.inputSource.replace("port:", ""));
-                    clientManager.connectToNeighbor(port);
+            // 2. Перевіряємо наявність джерел та підключаємось за потреби
+            if (schema.inputSources != null && !schema.inputSources.isEmpty()) {
+
+                // Перевіряємо, чи є серед джерел вказівки на фізичне підключення до портів
+                for (String sourceValue : schema.inputSources.values()) {
+                    if (sourceValue != null && sourceValue.startsWith("port:")) {
+                        int port = Integer.parseInt(sourceValue.replace("port:", ""));
+                        clientManager.connectToNeighbor(port);
+                    }
                 }
+
+                // 3. Запускаємо загальний конвеєр
+                streamManager.startPipeline();
             }
 
             return Mono.just(DefaultPayload.create("SCHEMA_LOADED_OK"));
