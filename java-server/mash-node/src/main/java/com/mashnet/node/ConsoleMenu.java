@@ -110,12 +110,21 @@ public class ConsoleMenu {
 
         System.out.println("Розсилка JSON LOAD_SCHEMA всім сусідам (" + connections.size() + ")...");
 
-        ComputationSchema mySchema = new ComputationSchema(
-                "task-math-01",
-                "MULTIPLY",
-                "port:8005",
-                "port:7002"
-        );
+        // Формуємо нову структуру схеми
+        ComputationSchema mySchema = new ComputationSchema();
+        mySchema.schemaId = "task-math-01";
+
+        mySchema.inputSources = new java.util.HashMap<>();
+        mySchema.inputSources.put("default-input", "port:8005");
+
+        mySchema.outputSink = "port:7002";
+
+        ComputationSchema.PipelineStage stage = new ComputationSchema.PipelineStage();
+        stage.stageId = "stage-1";
+        stage.operation = "MULTIPLY";
+        stage.parameters = new java.util.HashMap<>();
+
+        mySchema.pipelineStages = java.util.List.of(stage);
 
         try {
             String jsonSchema = JsonUtil.MAPPER.writeValueAsString(mySchema);

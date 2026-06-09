@@ -191,9 +191,14 @@ public class TopologyManager {
     // Геттер та Сеттер для схеми
     public void setCurrentSchema(ComputationSchema schema) {
         this.currentSchema = schema;
-        System.out.println(">>> [TOPOLOGY] Схему оновлено. Поточна операція: " +
-                (schema != null ? schema.operation : "НЕМАЄ"));
+
+        int stagesCount = (schema != null && schema.pipelineStages != null)
+                ? schema.pipelineStages.size()
+                : 0;
+
+        System.out.println(">>> [TOPOLOGY] Схему оновлено. Кількість етапів у пайплайні: " + stagesCount);
     }
+
     public ComputationSchema getCurrentSchema() {
         return currentSchema;
     }

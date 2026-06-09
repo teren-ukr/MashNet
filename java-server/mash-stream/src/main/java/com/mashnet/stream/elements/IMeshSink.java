@@ -1,10 +1,13 @@
 package com.mashnet.stream.elements;
 
 import reactor.core.publisher.Flux;
+import java.util.Map;
 
 public interface IMeshSink<T> {
     /**
-     * Підключає вхідний потік до цього елемента.
+     * Підключає іменовані вхідні потоки до цього елемента обробки.
+     * @param inputStreams Карта, де ключ — ідентифікатор входу (наприклад, "input-A"),
+     * а значення — реактивний потік даних.
      */
-    void connectInputStream(Flux<T> inputStream);
+    void connectInputStreams(Map<String, Flux<T>> inputStreams);
 }
