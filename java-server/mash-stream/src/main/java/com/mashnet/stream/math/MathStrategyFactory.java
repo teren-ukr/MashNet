@@ -10,6 +10,7 @@ public class MathStrategyFactory {
     public MathStrategyFactory(){
         registerStrategy(new AverageStrategy());
         registerStrategy(new MaxStrategy());
+        registerStrategy(new MultiplyStrategy());
     }
 
     private void registerStrategy(IMathStrategy strategy)

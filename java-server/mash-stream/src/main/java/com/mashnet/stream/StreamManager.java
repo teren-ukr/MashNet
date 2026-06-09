@@ -5,6 +5,7 @@ import com.mashnet.core.models.ComputationSchema;
 import com.mashnet.core.utils.JsonUtil;
 import com.mashnet.network.control.IStreamProvider;
 import com.mashnet.network.topology.TopologyManager;
+import com.mashnet.stream.elements.MathOperationElement;
 import com.mashnet.stream.math.IMathStrategy;
 import com.mashnet.stream.math.MathStrategyFactory;
 import com.mashnet.stream.sink.DataAggregatorSink;
@@ -89,26 +90,32 @@ public class StreamManager implements IStreamProvider {
             String myNodeId = topologyManager.getLocalNodeId();
             topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, true);
 
+            System.out.println(">>> [STREAM] Відкриваємо канал Request-Stream до " + targetNodeId);
+
+
+            // 1. Отримуємо сирий потік від сенсора (наш Source)
             var rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
                     .map(payload -> Double.parseDouble(payload.getDataUtf8()));
 
-            //передаємо стратегію
-            Flux<Double> sharedStream = dataAggregator.processStream(rawStream, targetNodeId, strategy).share();
+            // 2. Створюємо елемент математичної обробки
+            MathOperationElement mathElement = new MathOperationElement(strategy);
 
+            // 3. З'єднуємо: Вхід обчислювача = Вихід сенсора
+            mathElement.connectInputStream(rawStream);
 
+            // 4. Отримуємо готовий потік з результатами
+            Flux<Double> sharedStream = mathElement.getOutputStream();
 
-            // 3. Запускаємо потік
+            // Зберігаємо для роздачі іншим нодам
+            processedOutputs.put(targetNodeId, sharedStream);
+
+            // 5. Запускаємо потік (Підписуємось)
             Disposable streamDisposable = sharedStream
                     .doOnError(e -> System.err.println(">>> [STREAM] Зв'язок з нодою " + targetNodeId + " втрачено."))
                     .onErrorResume(e -> Mono.empty())
                     .doFinally(signalType -> {
-
-                        // ПРИ ЗУПИНЦІ робимо потік неактивним
                         topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, false);
-                        // Очищаємо пам'ять при зупинці
                         processedOutputs.remove(targetNodeId);
-
-
                         if (signalType == SignalType.CANCEL) {
                             System.out.println(">>> [STREAM] Потік призупинено (Нода " + targetNodeId + " залишається на зв'язку).");
                         } else {
@@ -150,11 +157,24 @@ public class StreamManager implements IStreamProvider {
 
         System.out.println(">>> [STREAM] Відкриваємо канал Request-Stream до " + targetNodeId);
 
+
+        // 1. Отримуємо сирий потік від сенсора (наш Source)
         var rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
                 .map(payload -> Double.parseDouble(payload.getDataUtf8()));
 
-        Flux<Double> sharedStream = dataAggregator.processStream(rawStream, targetNodeId, strategy).share();
+        // 2. Створюємо елемент математичної обробки
+        MathOperationElement mathElement = new MathOperationElement(strategy);
 
+        // 3. З'єднуємо: Вхід обчислювача = Вихід сенсора
+        mathElement.connectInputStream(rawStream);
+
+        // 4. Отримуємо готовий потік з результатами
+        Flux<Double> sharedStream = mathElement.getOutputStream();
+
+        // Зберігаємо для роздачі іншим нодам
+        processedOutputs.put(targetNodeId, sharedStream);
+
+        // 5. Запускаємо потік (Підписуємось)
         Disposable streamDisposable = sharedStream
                 .doOnError(e -> System.err.println(">>> [STREAM] Зв'язок з нодою " + targetNodeId + " втрачено."))
                 .onErrorResume(e -> Mono.empty())

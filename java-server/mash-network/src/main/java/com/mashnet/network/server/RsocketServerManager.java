@@ -149,7 +149,7 @@ public class RsocketServerManager {
 
                         return Mono.just(new ControlCommandHandler(topologyManager, clientManager, streamProvider));
                     })
-                    .bind(WebsocketServerTransport.create("localhost", wsPort))
+                    .bind(WebsocketServerTransport.create("0.0.0.0", wsPort))
                     .subscribe(v -> System.out.println(">>> [SERVER] WebSocket Сервер (UI) слухає на порту " + wsPort));
         } catch (Exception e) {
             System.err.println("!!! Помилка запуску WS сервера: " + e.getMessage());
