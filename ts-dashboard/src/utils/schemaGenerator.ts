@@ -4,32 +4,34 @@ export function generateComputationSchema(nodes: Node[], edges: Edge[]) {
     const inputSources: Record<string, string> = {};
     const pipelineStages: any[] = [];
 
-    // 1. Знаходимо всі вузли-сенсори
-    const sensorNodes = nodes.filter(n => n.type === 'sensorNode');
+    // 1. Знаходимо всі вузли-джерела (як фізичні сенсори, так і логічні мережеві джерела)
+    const sourceNodes = nodes.filter(n => n.type === 'sensorNode' || n.type === 'networkSourceNode');
     
-    // 2. Формуємо карту джерел (inputSources)
-    sensorNodes.forEach(sensor => {
-        const sensorId = sensor.data.sensorId as string;
-        // Шукаємо ребро, яке виходить з цього сенсора
-        const outgoingEdges = edges.filter(e => e.source === sensor.id);
+    sourceNodes.forEach(node => {
+        let sourceValue = '';
+        
+        if (node.type === 'sensorNode') {
+            sourceValue = node.data.sensorId as string;
+        } else if (node.type === 'networkSourceNode') {
+            // Форматуємо спеціальний маркер для бекенду
+            sourceValue = `STREAM:${node.data.targetNode}:${node.data.streamId}`;
+        }
+
+        const outgoingEdges = edges.filter(e => e.source === node.id);
         
         outgoingEdges.forEach(edge => {
-            // targetHandle - це ID порту (наприклад, 'input-A' або 'default-input')
             const portId = edge.targetHandle || 'default-input';
-            inputSources[portId] = sensorId;
+            inputSources[portId] = sourceValue;
         });
     });
 
-    // 3. Формуємо масив етапів обробки (найпростіше топологічне сортування)
-    // Виключаємо сенсори, залишаємо лише обчислювальні блоки
-    const processingNodes = nodes.filter(n => n.type !== 'sensorNode');
+    // 2. Формуємо масив етапів обробки (відкидаємо всі вузли джерел)
+    const processingNodes = nodes.filter(n => n.type !== 'sensorNode' && n.type !== 'networkSourceNode');
 
-    // Для надійності необхідно відсортувати вузли за порядком їх з'єднання.
-    // У базовому варіанті (якщо користувач додає їх послідовно) можна використати існуючий масив.
     processingNodes.forEach(node => {
         pipelineStages.push({
             stage_id: node.id,
-            operation: node.data.operation,
+            operation: node.data.operation || 'NETWORK_SINK', // Для NetworkSinkNode операція зберігатиметься тут
             parameters: node.data.parameters || {}
         });
     });

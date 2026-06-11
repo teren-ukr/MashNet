@@ -153,16 +153,29 @@ public class ControlCommandHandler implements RSocket {
     public Flux<Payload> requestStream(Payload payload) {
         String command = payload.getDataUtf8();
 
-        if ("SUBSCRIBE_EVENTS".equals(command))
+        if ("SUBSCRIBE_EVENTS".equals(command)) {
             return topologyManager
                     .getEventSink()
                     .asFlux()
                     .map(DefaultPayload::create);
+        }
 
-        if ("START_SENSOR".equals(command))
+        // Обробка запитів на підключення до потоків від Python-сенсорів або публічних Sink-ів
+        if (command.startsWith("SUBSCRIBE_STREAM:")) {
+            String requestedStreamId = command.replace("SUBSCRIBE_STREAM:", "");
+            System.out.println("\n[ROUTER] Вузол запитує підключення до публічного потоку: " + requestedStreamId);
+
+            return streamProvider
+                    .getProcessedStream(requestedStreamId)
+                    .map(value -> DefaultPayload.create(String.valueOf(value)));
+        }
+
+        // Зворотна сумісність для існуючих запитів від сенсорів
+        if ("START_SENSOR".equals(command)) {
             return streamProvider
                     .getProcessedStream("TODO")
                     .map(value -> DefaultPayload.create(String.valueOf(value)));
+        }
 
         return Flux.error(new IllegalArgumentException("Невідома команда потоку: " + command));
     }
