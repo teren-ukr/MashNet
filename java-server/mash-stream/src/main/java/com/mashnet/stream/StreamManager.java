@@ -186,19 +186,33 @@ public class StreamManager implements IStreamProvider {
         // 1. Встановлюємо з'єднання з кожним сенсором
         for (Map.Entry<String, String> entry : schema.inputSources.entrySet()) {
             String portId = entry.getKey();
-            String targetNodeId = entry.getValue();
+            String sourceValue = entry.getValue();
+
+            String targetNodeId;
+            String requestPayload;
+
+            // Парсимо маркер, згенерований дашбордом
+            if (sourceValue.startsWith("STREAM:")) {
+                String[] parts = sourceValue.split(":");
+                targetNodeId = parts[1];
+                requestPayload = "SUBSCRIBE_STREAM:" + parts[2]; // Наприклад: SUBSCRIBE_STREAM:my-calc-stream
+            } else {
+                targetNodeId = sourceValue; // Це фізичний Python сенсор
+                requestPayload = "START_SENSOR";
+            }
 
             RSocket rsocket = topologyManager.getActiveConnections().get(targetNodeId);
 
             if (rsocket != null) {
                 topologyManager.setStreamStatusAndBroadcast(targetNodeId, myNodeId, true);
 
-                Flux<Double> rawStream = rsocket.requestStream(DefaultPayload.create("START_SENSOR"))
+                // Виконуємо запит із динамічним Payload
+                Flux<Double> rawStream = rsocket.requestStream(DefaultPayload.create(requestPayload))
                         .map(payload -> Double.parseDouble(payload.getDataUtf8()))
                         .doOnError(e -> System.err.println(">>> [STREAM] Помилка потоку від " + targetNodeId));
 
                 sourceStreams.put(portId, rawStream);
-                System.out.println(">>> [STREAM] Порт [" + portId + "] підключено до вузла [" + targetNodeId + "]");
+                System.out.println(">>> [STREAM] Порт [" + portId + "] підключено до вузла [" + targetNodeId + "] запит: " + requestPayload);
             } else {
                 System.err.println(">>> [STREAM] УВАГА: Вузол " + targetNodeId + " недоступний!");
             }
@@ -228,21 +242,37 @@ public class StreamManager implements IStreamProvider {
      * Конструює ланцюжок обробки.
      */
     private Flux<Double> buildPipeline(Map<String, Flux<Double>> currentInputMap, ComputationSchema schema) {
-        Flux<Double> currentOutputStream = null;
+        Flux<Double> currentOutputStream = currentInputMap.getOrDefault("default-input", currentInputMap.values().stream().findFirst().orElse(null));
 
         if (schema.pipelineStages != null) {
             for (ComputationSchema.PipelineStage stage : schema.pipelineStages) {
 
-                // Патерн Factory Method для створення вузлів
-                MeshElement<Double, Double> element = MeshElementFactory.create(stage.operation);
+                // Спеціальний системний блок - Мережевий вихід (Sink)
+                if ("NETWORK_SINK".equalsIgnoreCase(stage.operation)) {
+                    String streamId = "unknown-stream";
+                    if (stage.parameters != null && stage.parameters.containsKey("streamId")) {
+                        streamId = stage.parameters.get("streamId").toString();
+                    }
 
+                    // Реєструємо поточний потік для публічного доступу іншими нодами
+                    if (currentOutputStream != null) {
+                        System.out.println(">>> [STREAM] Зареєстровано публічний потік (Sink): " + streamId);
+                        processedOutputs.put(streamId, currentOutputStream);
+                    } else {
+                        System.err.println(">>> [STREAM] Помилка: До NETWORK_SINK не підключено вхідних даних!");
+                    }
+
+                    continue; // Переходимо до наступного блоку (якщо він є)
+                }
+
+                // Логіка для стандартних DSP-блоків
+                MeshElement<Double, Double> element = MeshElementFactory.create(stage.operation);
                 element.connectInputStreams(currentInputMap);
 
-                // Визначаємо вихідний порт (для кореляції це 'tdoa-output', для інших 'default-output')
                 String outputPort = stage.operation.equals("CORRELATION") ? "tdoa-output" : "default-output";
                 currentOutputStream = element.getOutputStream(outputPort);
 
-                // Передаємо результат на наступний етап
+                // Оновлюємо мапу для наступного блоку
                 currentInputMap = Map.of("default-input", currentOutputStream);
             }
         }

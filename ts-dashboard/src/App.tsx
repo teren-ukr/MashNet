@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ReactFlow, Background, Controls, MiniMap } from '@xyflow/react';
+import { ReactFlow, Background, Controls, MiniMap, type Node, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import { MeshNode } from './components/MashNode';
@@ -10,22 +10,36 @@ import { useMeshNetwork } from './hooks/useMashNetwork';
 
 const nodeTypes = { meshNode: MeshNode };
 
+// Структура для зберігання стану одного ізольованого конвеєра
+interface StoredPipeline {
+  nodes: Node[];
+  edges: Edge[];
+}
+
 export default function App() {
   const { 
-    nodes, edges, 
+    nodes: macroNodes, edges: macroEdges, 
     onNodesChange, onEdgesChange, onConnectManual, 
     isConnected, reconnect, sendCommand 
   } = useMeshNetwork();
 
-  // Стан для керування відображенням: null = Макро-рівень (Топологія), string = ID вузла (Мікро-рівень)
   const [selectedNodeForEdit, setSelectedNodeForEdit] = useState<string | null>(null);
 
-  // Обробник подвійного кліку по вузлу
-  const onNodeDoubleClick = (event: React.MouseEvent, node: any) => {
-    // Дозволяємо редагувати лише обчислювальні вузли (Java), а не сенсори чи дашборд
+  // Глобальний реєстр пайплайнів для всіх нод мережі (Key: nodeId, Value: StoredPipeline)
+  const [savedPipelines, setSavedPipelines] = useState<Record<string, StoredPipeline>>({});
+
+  const onNodeDoubleClick = (_event: React.MouseEvent, node: any) => {
     if (node.id.startsWith('JavaNode') || node.id.startsWith('Seed')) {
       setSelectedNodeForEdit(node.id);
     }
+  };
+
+  // Метод для збереження стану графа конкретної ноди в пам'яті дашборду
+  const handleSavePipelineLayout = (nodeId: string, currentNodes: Node[], currentEdges: Edge[]) => {
+    setSavedPipelines((prev) => ({
+      ...prev,
+      [nodeId]: { nodes: currentNodes, edges: currentEdges }
+    }));
   };
 
   return (
@@ -34,26 +48,31 @@ export default function App() {
       <StatusBar isConnected={isConnected} onReconnect={reconnect} />
       
       {selectedNodeForEdit ? (
-        /* МІКРО-РІВЕНЬ: Ізольований простір для редагування DSP-графа */
         <PipelineEditor 
-          nodeId={selectedNodeForEdit} 
-          onClose={() => setSelectedNodeForEdit(null)} 
+          nodeId={selectedNodeForEdit}
+          // Передаємо раніше збережені вузли або порожній масив, якщо нода редагується вперше
+          initialNodes={savedPipelines[selectedNodeForEdit]?.nodes || []}
+          initialEdges={savedPipelines[selectedNodeForEdit]?.edges || []}
+          macroNodes={macroNodes} // Передаємо макро-вузли для отримання списку сенсорів
+          onClose={(currentNodes, currentEdges) => {
+            // Перед закриттям фіксуємо візуальну структуру в батьківському стані
+            handleSavePipelineLayout(selectedNodeForEdit, currentNodes, currentEdges);
+            setSelectedNodeForEdit(null);
+          }} 
           onDeploy={(schemaJson) => {
-             // Формуємо структуру, яку очікує Java бекенд для DEPLOY_SCHEMA
-             const requestPayload = JSON.stringify({
-                 targetNode: selectedNodeForEdit,
-                 schema: JSON.parse(schemaJson)
-             });
-             sendCommand('DEPLOY_SCHEMA', requestPayload);
+            const requestPayload = JSON.stringify({
+                targetNode: selectedNodeForEdit,
+                schema: JSON.parse(schemaJson)
+            });
+            sendCommand('DEPLOY_SCHEMA', requestPayload);
           }}
         />
       ) : (
-        /* МАКРО-РІВЕНЬ: Глобальна топологія мережі */
         <>
-          <ControlPanel nodes={nodes} onSendCommand={sendCommand} />
+          <ControlPanel nodes={macroNodes} onSendCommand={sendCommand} />
           <ReactFlow 
-            nodes={nodes} 
-            edges={edges} 
+            nodes={macroNodes} 
+            edges={macroEdges} 
             onNodesChange={onNodesChange} 
             onEdgesChange={onEdgesChange} 
             onConnect={onConnectManual}
