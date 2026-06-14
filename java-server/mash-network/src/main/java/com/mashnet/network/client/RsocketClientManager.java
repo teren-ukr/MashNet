@@ -42,21 +42,31 @@ public class RsocketClientManager {
      * Спроба підключитися до іншої ноди, дізнатися її ID та поширити плітку (Gossip) про новий зв'язок.
      *
      * @param targetPort порт ноди-сусіда.
+     *
+     * Старий метод (для зворотної сумісності з ConsoleMenu).
+     * За замовчуванням підключається до localhost.
      */
     public void connectToNeighbor(int targetPort) {
-        System.out.println(">>> [CLIENT] Спроба підключення до порту " + targetPort + "...");
+        connectToNeighbor("127.0.0.1", targetPort);
+    }
 
-        createRawConnection(targetPort)
+    /**
+     * НОВИЙ метод: Спроба підключитися до іншої ноди за вказаним IP та портом.
+     */
+    public void connectToNeighbor(String targetHost, int targetPort) {
+        System.out.println(">>> [CLIENT] Спроба підключення до " + targetHost + ":" + targetPort + "...");
+
+        createRawConnection(targetHost, targetPort)
                 .subscribe(
                         rsocket -> handleSuccessfulConnection(rsocket, targetPort),
-                        err -> System.err.println("\n[ERROR] Не вдалося з'єднатися з портом " + targetPort + ": " + err.getMessage())
+                        err -> System.err.println("\n[ERROR] Не вдалося з'єднатися з " + targetHost + ":" + targetPort + ": " + err.getMessage())
                 );
     }
 
     /**
      * Низькорівневе створення сокета з налаштуванням SSL та Retry патерну (авто-відновлення).
      */
-    private Mono<RSocket> createRawConnection(int port) {
+    private Mono<RSocket> createRawConnection(String host, int port) {
         Payload setupPayload = DefaultPayload.create(topologyManager.getLocalNodeId(), String.valueOf(localPort));
 
         try {
@@ -71,12 +81,9 @@ public class RsocketClientManager {
                     .trustManager(caCert) // Перевіряємо сервер за допомогою CA
                     .build();
 
-            // ВАЖЛИВО: Підключаємось до IP віртуалки або Seed-ноди.
-            // Для локального тесту на віртуалці використовуємо localhost, але
-            // якщо ми стукаємо до іншої віртуалки (напр. Seed), треба передавати її IP.
-            // Поки залишимо localhost, якщо вони на одній машині, але для меш-мережі сюди треба передавати IP.
+            // Використовуємо передану змінну host
             TcpClient tcpClient = TcpClient.create()
-                    .host("0.0.0.0") // Для тестування. Потім замінимо на змінну host
+                    .host(host)
                     .port(port)
                     .secure(ssl -> ssl.sslContext(sslContext));
 

@@ -109,6 +109,34 @@ public class ControlCommandHandler implements RSocket {
             return Mono.just(DefaultPayload.create("RESET_OK"));
         });
 
+        requestResponseCommands.put("REMOTE_CONNECT", (payload, nodeId) -> {
+            try {
+                // Читаємо JSON параметрів підключення з метаданих
+                com.fasterxml.jackson.databind.JsonNode request = com.mashnet.core.utils.JsonUtil.MAPPER.readTree(payload.getMetadataUtf8());
+                String fromNode = request.get("fromNode").asText();
+                String toHost = request.get("toHost").asText();
+                int toPort = request.get("toPort").asInt();
+
+                System.out.println("\n[ORCHESTRATOR] Отримано наказ: Вузол [" + fromNode + "] має підключитися до [" + toHost + ":" + toPort + "]");
+
+                // Перевіряємо, чи цей наказ призначений поточній ноді
+                if (fromNode.equals(topologyManager.getLocalNodeId())) {
+                    clientManager.connectToNeighbor(toHost, toPort);
+                    return Mono.just(DefaultPayload.create("CONNECT_INITIATED_LOCCAL"));
+                } else {
+                    // Якщо це Seed, він шукає RSocket-з'єднання з нодою fromNode і пересилає наказ їй
+                    RSocket targetSocket = topologyManager.getActiveConnections().get(fromNode);
+                    if (targetSocket != null) {
+                        return targetSocket.requestResponse(DefaultPayload.create("REMOTE_CONNECT", payload.getMetadataUtf8()));
+                    } else {
+                        return Mono.just(DefaultPayload.create("ERROR: Ноду відправника " + fromNode + " не знайдено в мережі"));
+                    }
+                }
+            } catch (Exception e) {
+                return Mono.just(DefaultPayload.create("ERROR: " + e.getMessage()));
+            }
+        });
+
         fireAndForgetCommands.put("NEW_EDGE", new NewEdgeCommand(topologyManager));
         fireAndForgetCommands.put("STREAM_EVENT", new StreamEventCommand(topologyManager));
     }
@@ -137,6 +165,13 @@ public class ControlCommandHandler implements RSocket {
         if (commandName.startsWith("LOAD_SCHEMA"))
             commandName = "LOAD_SCHEMA";
 
+        if (commandName.startsWith("DEPLOY_SCHEMA"))
+            commandName = "DEPLOY_SCHEMA";
+
+        // Додано перевірку для нової команди оркестрації
+        if (commandName.startsWith("REMOTE_CONNECT"))
+            commandName = "REMOTE_CONNECT";
+
         IControlCommand command = requestResponseCommands.get(commandName);
 
         if (command != null)
@@ -144,7 +179,6 @@ public class ControlCommandHandler implements RSocket {
 
         return Mono.just(DefaultPayload.create("ERROR: UNKNOWN_COMMAND"));
     }
-
     /**
      * Відкриття постійного потоку даних (Stream).
      * Використовується для підписки на події мережі або запуску безперервних обчислень.
