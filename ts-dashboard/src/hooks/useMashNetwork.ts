@@ -170,6 +170,51 @@ export const useMeshNetwork = () => {
     return () => { if (rsocketRef.current) rsocketRef.current.close(); };
   }, []);
 
+
+  //------------------------------------------------------------------------------------------------------
+
+  // Зберігаємо активні підписки на потоки, щоб їх можна було зупинити
+  const streamSubscriptions = useRef<Map<string, any>>(new Map());
+
+  // Функція для підписки на потік даних (для Візуалізатора)
+  const startVisualizerStream = (sourceId: string, visualizerId: string) => {
+    if (!rsocketRef.current || !isConnected) return;
+
+    console.log(`[STREAM] Підписка на потік ${sourceId} для візуалізатора ${visualizerId}`);
+
+    const subscription = rsocketRef.current.requestStream({
+      data: `SUBSCRIBE_STREAM:${sourceId}`,
+      metadata: ''
+    }).subscribe({
+      onSubscribe: (sub: any) => {
+        sub.request(2147483647); // Запитуємо максимальну кількість даних
+      },
+      onNext: (payload: any) => {
+        // Отримуємо цифру від бекенду
+        const value = parseFloat(payload.data);
+        
+        // Генеруємо подію, яку зловить наш Canvas (швидкий спосіб без рендеру React)
+        window.dispatchEvent(new CustomEvent('visualizer-data', {
+          detail: { visualizerId, value }
+        }));
+      },
+      onError: (err: any) => console.error(`[STREAM ERROR]`, err),
+      onComplete: () => console.log(`[STREAM] Потік ${sourceId} завершено.`)
+    });
+
+    streamSubscriptions.current.set(visualizerId, subscription);
+  };
+
+  const stopVisualizerStream = (visualizerId: string) => {
+    const sub = streamSubscriptions.current.get(visualizerId);
+    if (sub) {
+      sub.cancel(); // Скасовуємо підписку RSocket
+      streamSubscriptions.current.delete(visualizerId);
+      console.log(`[STREAM] Потік для ${visualizerId} зупинено.`);
+    }
+  };
+
+
   // ==========================================
   // ЕКСПОРТ ДАНИХ ТА ФУНКЦІЙ У КОМПОНЕНТИ
   // ==========================================
@@ -178,7 +223,9 @@ export const useMeshNetwork = () => {
     onNodesChange, onEdgesChange, onConnectManual, 
     isConnected, reconnect: connectToBackend, 
     sendCommand,
-    activeTasks, // Експортуємо задачі
-    stopTask     // Експортуємо функцію зупинки
+    activeTasks, 
+    stopTask,     
+    startVisualizerStream, 
+    stopVisualizerStream   // ДОДАЛИ
   };
 };
