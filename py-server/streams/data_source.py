@@ -11,5 +11,5 @@ class IDataSource(ABC):
 class MockTemperatureSource(IDataSource):
     """Конкретна реалізація джерела даних (генератор температури)."""
     def get_data(self) -> bytes:
-        temp = round(random.uniform(20.0, 30.0), 2)
+        temp = round(random.uniform(1.0, 10.0), 2)
         return str(temp).encode('utf-8')
