@@ -198,7 +198,7 @@ export function VisualizerNode({ id, data }: NodeProps) {
                     /> 
                     Auto-Scale
                 </label>
-                
+                 
                 {!isAutoScale && (
                     <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginLeft: 'auto' }}>
                         Min: 
