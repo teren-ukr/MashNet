@@ -1,11 +1,13 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps, useReactFlow } from '@xyflow/react';
 import React from 'react';
 
 export function MathNode({ id, data }: NodeProps) {
+    // Дістаємо функцію оновлення безпосередньо з React Flow
+    const { updateNodeData } = useReactFlow();
+
     const handleOperationChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        if (data.onChange && typeof data.onChange === 'function') {
-            data.onChange(id, 'operation', event.target.value);
-        }
+        // Оновлюємо стан вузла (його operation) напряму
+        updateNodeData(id, { operation: event.target.value });
     };
 
     return (
@@ -30,5 +32,5 @@ export function MathNode({ id, data }: NodeProps) {
             {/* Вихід праворуч */}
             <Handle type="source" position={Position.Right} id="default-output" style={{ top: '50%' }} />
         </div>
-    );
+    ); 
 }
