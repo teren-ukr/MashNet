@@ -12,13 +12,15 @@ import { CorrelationNode } from '../nodes/CorrelationNode';
 import { generateComputationSchema } from '../utils/schemaGenerator';
 import { NetworkSinkNode } from '../nodes/NetworkSinkNode';
 import { NetworkSourceNode } from '../nodes/NetworkSourceNode';
+import { VisualizerNode } from '../nodes/VisualizerNode';
 
 const pipelineNodeTypes = {
-    sensorNode: SensorNode,
-    mathNode: MathNode,
-    correlationNode: CorrelationNode,
-    networkSinkNode: NetworkSinkNode,
-    networkSourceNode: NetworkSourceNode
+    sensorNode:         SensorNode,
+    mathNode:           MathNode,
+    correlationNode:    CorrelationNode,
+    networkSinkNode:    NetworkSinkNode,
+    networkSourceNode:  NetworkSourceNode,
+    visualizerNode:     VisualizerNode
 };
 
 interface PipelineEditorProps {
@@ -28,9 +30,11 @@ interface PipelineEditorProps {
     macroNodes: Node[]; 
     onClose: (currentNodes: Node[], currentEdges: Edge[]) => void;
     onDeploy: (schemaJson: string) => void;
+    onStartStream?: (sourceId: string, visualizerId: string) => void; 
+    onStopStream?: (visualizerId: string) => void;
 }
 
-function EditorCanvas({ nodeId, initialNodes, initialEdges, macroNodes, onClose, onDeploy }: PipelineEditorProps) {
+function EditorCanvas({ nodeId, initialNodes, initialEdges, macroNodes, onClose, onDeploy, onStartStream, onStopStream }: PipelineEditorProps) {
     const [nodes, setNodes] = useState<Node[]>(initialNodes);
     const [edges, setEdges] = useState<Edge[]>(initialEdges);
 
@@ -74,34 +78,52 @@ function EditorCanvas({ nodeId, initialNodes, initialEdges, macroNodes, onClose,
     const nodesWithDynamicData = useMemo(() => {
         return nodes.map(node => {
             if (node.type === 'sensorNode') {
-                return {
-                    ...node,
-                    data: { 
-                        ...node.data, 
-                        availableSensors, 
-                        onChange: (field: string, value: string) => updateNodeField(node.id, field, value) 
-                    }
-                };
+                return { ...node, data: { ...node.data, availableSensors, onChange: (field: string, value: string) => updateNodeField(node.id, field, value) } };
             }
             if (node.type === 'networkSourceNode') {
+                return { ...node, data: { ...node.data, availableNodes: availableJavaNodes, onChange: (field: string, value: string) => updateNodeField(node.id, field, value) } };
+            }
+            
+            // ВЧИМО ОСЦИЛОГРАФ ЧИТАТИ ДРОТИ
+            if (node.type === 'visualizerNode') {
+                const incomingEdge = edges.find(e => e.target === node.id);
+                let sourceName = '';
+
+                if (incomingEdge) {
+                    const sourceNode = nodes.find(n => n.id === incomingEdge.source);
+                    if (sourceNode) {
+                        if (sourceNode.type === 'sensorNode') {
+                            sourceName = `Сенсор ${(sourceNode.data.sensorId as string || '').slice(-4)}`;
+                        } else if (sourceNode.type === 'mathNode') {
+                            sourceName = `${sourceNode.data.operation || 'Обробка'}`;
+                        } else {
+                            sourceName = `Вузол підключено`;
+                        }
+                    }
+                }
+
                 return {
                     ...node,
                     data: { 
                         ...node.data, 
-                        availableNodes: availableJavaNodes, 
-                        onChange: (field: string, value: string) => updateNodeField(node.id, field, value) 
+                        // ОСЬ ГОЛОВНА ЗМІНА: Кажемо осцилографу слухати свій власний 
+                        // прихований потік, який згенерував schemaGenerator!
+                        connectedSourceId: `vis-${node.id}`, 
+                        connectedSourceName: sourceName, 
+                        availableSources: availableJavaNodes, 
+                        onStart: onStartStream,
+                        onStop: onStopStream
                     }
                 };
             }
             return node;
         });
-    }, [nodes, availableSensors, availableJavaNodes, updateNodeField]);
+    }, [nodes, edges, availableSensors, availableJavaNodes, updateNodeField, onStartStream, onStopStream]);
 
     const handleDeploy = () => {
         const schema = generateComputationSchema(nodes, edges);
         console.log("[DASHBOARD] Згенерована схема (Об'єкт):", schema);
         
-        // Виправляємо помилку: перетворюємо об'єкт у JSON-рядок
         onDeploy(JSON.stringify(schema));
     };
 
@@ -131,6 +153,9 @@ function EditorCanvas({ nodeId, initialNodes, initialEdges, macroNodes, onClose,
                 <button onClick={() => addNode('correlationNode', 'CORRELATION')} style={{ padding: '6px 12px', background: '#C62828', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                     + Корелятор
                 </button>
+                <button onClick={() => addNode('visualizerNode', 'VISUALIZE')} style={{ padding: '6px 12px', background: '#FBC02D', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                    + Осцилограф
+                </button>
                 <button onClick={() => addNode('mathNode', 'AVERAGE')} style={{ padding: '6px 12px', background: '#1565C0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                     + Математика
                 </button>
@@ -154,7 +179,7 @@ function EditorCanvas({ nodeId, initialNodes, initialEdges, macroNodes, onClose,
             </div>
 
             <ReactFlow
-                nodes={nodesWithDynamicData} // ВИПРАВЛЕНО: Тепер використовується правильна назва змінної
+                nodes={nodesWithDynamicData} 
                 edges={edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}

@@ -18,9 +18,17 @@ interface StoredPipeline {
 
 export default function App() {
   const { 
-    nodes: macroNodes, edges: macroEdges, 
-    onNodesChange, onEdgesChange, onConnectManual, 
-    isConnected, reconnect, sendCommand 
+    nodes: macroNodes,
+    edges: macroEdges, 
+    onNodesChange,
+    onEdgesChange, 
+    onConnectManual, 
+    isConnected, 
+    reconnect, 
+    sendCommand,
+
+    startVisualizerStream,
+    stopVisualizerStream,
   } = useMeshNetwork();
 
   const [selectedNodeForEdit, setSelectedNodeForEdit] = useState<string | null>(null);
@@ -54,6 +62,8 @@ export default function App() {
           initialNodes={savedPipelines[selectedNodeForEdit]?.nodes || []}
           initialEdges={savedPipelines[selectedNodeForEdit]?.edges || []}
           macroNodes={macroNodes} // Передаємо макро-вузли для отримання списку сенсорів
+          onStartStream={startVisualizerStream} // <--- ДОДАЙ ЦЕ
+          onStopStream={stopVisualizerStream}   // <--- ДОДАЙ ЦЕ
           onClose={(currentNodes, currentEdges) => {
             // Перед закриттям фіксуємо візуальну структуру в батьківському стані
             handleSavePipelineLayout(selectedNodeForEdit, currentNodes, currentEdges);
