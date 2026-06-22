@@ -6,12 +6,13 @@ public class MeshElementFactory {
 
     private static final MathStrategyFactory mathFactory = new MathStrategyFactory();
 
-    public static MeshElement<Double, Double> create(String operation) {
+    // Змінюємо тип повернення на MeshElement<?, ?>
+    public static MeshElement<?, ?> create(String operation) {
         if ("CORRELATION".equalsIgnoreCase(operation) || "GCC_PHAT".equalsIgnoreCase(operation)) {
             return new CorrelationElement();
         }
 
-        // Поведінка за замовчуванням - використання стратегій для SISO
+        // Поведінка за замовчуванням - використання стратегій для SISO (Double)
         return new MathOperationElement(mathFactory.getStrategy(operation));
     }
 }

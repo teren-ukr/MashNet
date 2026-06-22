@@ -31,18 +31,50 @@ export const useMeshNetwork = () => {
     [setEdges],
   );
 
-  // Відправка будь-яких команд на бекенд (Java)
-  const sendCommand = (command: string, payloadStr: string = '') => {
+// Відправка будь-яких команд на бекенд (Java)
+  // ДОДАНО: Третій аргумент targetNodeId
+  const sendCommand = (command: string, payloadStr: string = '', targetNodeId?: string) => {
     if (!rsocketRef.current || !isConnected) {
       alert("Немає підключення до сервера!");
       return;
     }
 
-    const payload = { data: command, metadata: payloadStr };
+    if (command === 'GET_TOPOLOGY') {
+      fetchTopology(rsocketRef.current);
+      return;
+    }
 
-    if (command === 'STOP_ALL' || command === 'NEW_EDGE' || command === 'STREAM_EVENT' || command === 'STOP_SCHEMA') {
+    // ВАЖЛИВО: Якщо команда має цільовий вузол (наприклад з ControlPanel), 
+    // і payload порожній, пакуємо ціль у JSON
+    let finalPayloadStr = payloadStr;
+    if (targetNodeId && payloadStr === '') {
+        finalPayloadStr = JSON.stringify({ targetNode: targetNodeId });
+    }
+
+    const payload = { data: command, metadata: finalPayloadStr };
+
+    // Додаємо команди RESET та STOP до списку FireAndForget
+    if (['STOP_ALL', 'NEW_EDGE', 'STREAM_EVENT', 'STOP_SCHEMA', 'RESET', 'STOP'].includes(command)) {
       rsocketRef.current.fireAndForget(payload);
-      console.log(`[FIRE_AND_FORGET] Відправлено: ${command}`);
+      console.log(`[FIRE_AND_FORGET] Відправлено: ${command} на ціль: ${targetNodeId || 'Глобально'}`);
+
+      // Якщо це глобальний стоп - гасимо всі лінії
+      if (command === 'STOP_ALL') {
+        streamSubscriptions.current.forEach((sub, id) => {
+          try { sub.cancel(); } catch (e) {}
+        });
+        streamSubscriptions.current.clear();
+
+        setEdges((prevEdges) => 
+          prevEdges.map((edge) => ({
+            ...edge, animated: false, style: { stroke: '#555', strokeWidth: 2 }
+          }))
+        );
+        
+        setTimeout(() => {
+          if (rsocketRef.current) fetchTopology(rsocketRef.current);
+        }, 1500);
+      }
     } else {
       rsocketRef.current.requestResponse(payload).subscribe({
         onComplete: (res: any) => console.log(`[ВІДПОВІДЬ] ${command}:`, res.data),
@@ -177,25 +209,31 @@ export const useMeshNetwork = () => {
   const streamSubscriptions = useRef<Map<string, any>>(new Map());
 
   // Функція для підписки на потік даних (для Візуалізатора)
-  const startVisualizerStream = (sourceId: string, visualizerId: string) => {
+  const startVisualizerStream = (sourceId: string, visualizerId: string, executorNodeId: string) => {
     if (!rsocketRef.current || !isConnected) return;
 
-    console.log(`[STREAM] Підписка на потік ${sourceId} для візуалізатора ${visualizerId}`);
+    stopVisualizerStream(visualizerId);
 
+    console.log(`[STREAM] Підписка на потік ${sourceId} на вузлі ${executorNodeId}`);
+
+    // Додаємо ID ноди-виконавця до команди
     const subscription = rsocketRef.current.requestStream({
-      data: `SUBSCRIBE_STREAM:${sourceId}`,
+      data: `SUBSCRIBE_STREAM:${executorNodeId}:${sourceId}`,
       metadata: ''
     }).subscribe({
       onSubscribe: (sub: any) => {
-        sub.request(2147483647); // Запитуємо максимальну кількість даних
+        sub.request(2147483647);
       },
       onNext: (payload: any) => {
-        // Отримуємо цифру від бекенду
-        const value = parseFloat(payload.data);
+        let parsedValue;
+        try {
+            parsedValue = JSON.parse(payload.data);
+        } catch (e) {
+            parsedValue = parseFloat(payload.data);
+        }
         
-        // Генеруємо подію, яку зловить наш Canvas (швидкий спосіб без рендеру React)
         window.dispatchEvent(new CustomEvent('visualizer-data', {
-          detail: { visualizerId, value }
+          detail: { visualizerId, value: parsedValue }
         }));
       },
       onError: (err: any) => console.error(`[STREAM ERROR]`, err),

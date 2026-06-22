@@ -58,24 +58,38 @@ export default function App() {
       {selectedNodeForEdit ? (
         <PipelineEditor 
           nodeId={selectedNodeForEdit}
-          // Передаємо раніше збережені вузли або порожній масив, якщо нода редагується вперше
           initialNodes={savedPipelines[selectedNodeForEdit]?.nodes || []}
           initialEdges={savedPipelines[selectedNodeForEdit]?.edges || []}
-          macroNodes={macroNodes} // Передаємо макро-вузли для отримання списку сенсорів
-          onStartStream={startVisualizerStream} // <--- ДОДАЙ ЦЕ
-          onStopStream={stopVisualizerStream}   // <--- ДОДАЙ ЦЕ
+          macroNodes={macroNodes}
+          
+          onStartStream={(src, vis) => startVisualizerStream(src, vis, selectedNodeForEdit!)} 
+          onStopStream={stopVisualizerStream}
+          
           onClose={(currentNodes, currentEdges) => {
-            // Перед закриттям фіксуємо візуальну структуру в батьківському стані
             handleSavePipelineLayout(selectedNodeForEdit, currentNodes, currentEdges);
             setSelectedNodeForEdit(null);
           }} 
+          
+          // === ОСЬ ЦЮ ФУНКЦІЮ ПОВНІСТЮ ЗАМІНЮЄМО ===
           onDeploy={(schemaJson) => {
-            const requestPayload = JSON.stringify({
-                targetNode: selectedNodeForEdit,
-                schema: JSON.parse(schemaJson)
-            });
-            sendCommand('DEPLOY_SCHEMA', requestPayload);
+            console.log(`[DASHBOARD] Очищення цільового вузла ${selectedNodeForEdit} перед деплоєм...`);
+            
+            // 1. Відправляємо команду RESET тільки на конкретний вузол, а не STOP_ALL.
+            // Формуємо payload у вигляді JSON, так само як і для DEPLOY_SCHEMA
+            const resetPayload = JSON.stringify({ targetNode: selectedNodeForEdit });
+            sendCommand('RESET', resetPayload);
+
+            // 2. Робимо паузу 500мс і розгортаємо нову схему
+            setTimeout(() => {
+                const requestPayload = JSON.stringify({
+                    targetNode: selectedNodeForEdit,
+                    schema: JSON.parse(schemaJson)
+                });
+                sendCommand('DEPLOY_SCHEMA', requestPayload);
+                console.log(`[DASHBOARD] Нова схема успішно розгорнута на ${selectedNodeForEdit}!`);
+            }, 500);
           }}
+          // =========================================
         />
       ) : (
         <>
