@@ -7,7 +7,9 @@ import reactor.core.publisher.Flux;
  * Дозволяє мережевому шару не залежати від модуля mash-stream.
  */
 public interface IStreamProvider {
-    Flux<Double> getProcessedStream(String sourceId);
+
+    // Змінено з Double на String
+    Flux<String> getProcessedStream(String sourceId);
 
     void startStreamFrom(String targetNodeId);
     void stopAllStreams();

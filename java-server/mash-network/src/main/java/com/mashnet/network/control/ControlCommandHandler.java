@@ -188,27 +188,43 @@ public class ControlCommandHandler implements RSocket {
         String command = payload.getDataUtf8();
 
         if ("SUBSCRIBE_EVENTS".equals(command)) {
-            return topologyManager
-                    .getEventSink()
-                    .asFlux()
-                    .map(DefaultPayload::create);
+            return topologyManager.getEventSink().asFlux().map(DefaultPayload::create);
         }
 
-        // Обробка запитів на підключення до потоків від Python-сенсорів або публічних Sink-ів
         if (command.startsWith("SUBSCRIBE_STREAM:")) {
-            String requestedStreamId = command.replace("SUBSCRIBE_STREAM:", "");
-            System.out.println("\n[ROUTER] Вузол запитує підключення до публічного потоку: " + requestedStreamId);
+            String payloadStr = command.replace("SUBSCRIBE_STREAM:", "");
+            String targetNode = topologyManager.getLocalNodeId();
+            String streamId = payloadStr;
 
-            return streamProvider
-                    .getProcessedStream(requestedStreamId)
-                    .map(value -> DefaultPayload.create(String.valueOf(value)));
+            if (payloadStr.contains(":")) {
+                String[] parts = payloadStr.split(":", 2);
+                targetNode = parts[0];
+                streamId = parts[1];
+            }
+
+            System.out.println("\n[ROUTER] Запит потоку [" + streamId + "] з вузла [" + targetNode + "]");
+
+            if (targetNode.equals(topologyManager.getLocalNodeId()) || targetNode.equals("LOCAL")) {
+                return streamProvider
+                        .getProcessedStream(streamId)
+                        .map(DefaultPayload::create);
+            } else {
+                // ПРОКСІЮВАННЯ ДО ІНШОЇ НОДИ
+                RSocket targetSocket = topologyManager.getActiveConnections().get(targetNode);
+                if (targetSocket != null) {
+                    System.out.println(">>> [ROUTER] Перенаправлення потоку до " + targetNode);
+                    // Важливо: якщо запит був на сирий сенсор, шлемо просто START_SENSOR
+                    String proxyCmd = streamId.equals("START_SENSOR") ? "START_SENSOR" : "SUBSCRIBE_STREAM:LOCAL:" + streamId;
+                    return targetSocket.requestStream(DefaultPayload.create(proxyCmd));
+                } else {
+                    System.err.println("!!! [ROUTER] Вузол " + targetNode + " не знайдено для проксіювання.");
+                    return Flux.error(new RuntimeException("Вузол " + targetNode + " недоступний"));
+                }
+            }
         }
 
-        // Зворотна сумісність для існуючих запитів від сенсорів
         if ("START_SENSOR".equals(command)) {
-            return streamProvider
-                    .getProcessedStream("TODO")
-                    .map(value -> DefaultPayload.create(String.valueOf(value)));
+            return streamProvider.getProcessedStream("TODO").map(DefaultPayload::create);
         }
 
         return Flux.error(new IllegalArgumentException("Невідома команда потоку: " + command));
